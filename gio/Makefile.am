@@ -402,6 +402,8 @@ libgio_2_0_la_SOURCES =		\
 	gioprivate.h		\
 	giowin32-priv.h 	\
 	gloadableicon.c 	\
+	gkdbus.c                \
+	gkdbusconnection.c	\
 	gmount.c 		\
 	gmemoryinputstream.c 	\
 	gmemoryoutputstream.c 	\
@@ -580,6 +582,8 @@ gio_headers =			\
 	giomodule.h 		\
 	gioscheduler.h 		\
 	giostream.h		\
+	gkdbus.h                \
+	gkdbusconnection.h	\
 	gloadableicon.h 	\
 	gmount.h 		\
 	gmemoryinputstream.h 	\
