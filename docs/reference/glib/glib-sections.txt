@@ -2104,6 +2104,7 @@ GUnixFDSourceFunc
 g_unix_fd_add
 g_unix_fd_add_full
 g_unix_fd_source_new
+g_unix_fd_ensure_zero_copy_safe
 
 <SUBSECTION Private>
 g_unix_error_quark
