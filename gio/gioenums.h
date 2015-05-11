@@ -912,8 +912,6 @@ typedef enum {
  * @G_BUS_TYPE_NONE: Not a message bus.
  * @G_BUS_TYPE_SYSTEM: The system-wide message bus.
  * @G_BUS_TYPE_SESSION: The login session message bus.
- * @G_BUS_TYPE_MACHINE: New bus type for kdbus transport (falls back to system bus in case of failure).
- * @G_BUS_TYPE_USER: New bus type for kdbus transport (falls back to session bus in case of failure).
  *
  * An enumeration for well-known message buses.
  *
@@ -924,9 +922,7 @@ typedef enum
   G_BUS_TYPE_STARTER = -1,
   G_BUS_TYPE_NONE = 0,
   G_BUS_TYPE_SYSTEM  = 1,
-  G_BUS_TYPE_SESSION = 2,
-  G_BUS_TYPE_MACHINE = 3,
-  G_BUS_TYPE_USER = 4
+  G_BUS_TYPE_SESSION = 2
 } GBusType;
 
 /**
@@ -952,14 +948,17 @@ typedef enum
 /**
  * GBusRequestNameReplyFlags:
  * @G_BUS_REQUEST_NAME_FLAGS_ERROR: Error flag.
- * @G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER: Caller is now the primary owner of the name, replacing any previous owner.
- * @G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE: The name already had an owner, the application will be placed in a queue.
+ * @G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER: Caller is now the primary owner of the name, replacing
+ * any previous owner.
+ * @G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE: The name already had an owner, the application will be
+ * placed in a queue.
  * @G_BUS_REQUEST_NAME_FLAGS_EXISTS: The name already has an owner.
- * @G_BUS_REQUEST_NAME_FLAGS_ALREADY_OWNER: The application trying to request ownership of a name is already the owner of it.
+ * @G_BUS_REQUEST_NAME_FLAGS_ALREADY_OWNER: The application trying to request ownership of a name
+ * is already the owner of it.
  *
  * Flags used in g_dbus_request_name().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 typedef enum
 {
@@ -974,12 +973,12 @@ typedef enum
  * GBusReleaseNameReplyFlags:
  * @G_BUS_RELEASE_NAME_FLAGS_ERROR: Error flag.
  * @G_BUS_RELEASE_NAME_FLAGS_RELEASED: The caller has released his claim on the given name.
- * @G_BUS_RELEASE_NAME_FLAGS_NON_EXISTENT: The given name does not exist on this bus
- * @G_BUS_RELEASE_NAME_FLAGS_NOT_OWNER: The caller not waiting in the queue to own this name
+ * @G_BUS_RELEASE_NAME_FLAGS_NON_EXISTENT: The given name does not exist on this bus.
+ * @G_BUS_RELEASE_NAME_FLAGS_NOT_OWNER: The caller not waiting in the queue to own this name.
  *
  * Flags used in g_dbus_release_name().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 typedef enum
 {
@@ -988,6 +987,23 @@ typedef enum
   G_BUS_RELEASE_NAME_FLAGS_NON_EXISTENT = 2,
   G_BUS_RELEASE_NAME_FLAGS_NOT_OWNER = 3
 } GBusReleaseNameReplyFlags;
+
+/**
+ * GBusStartServiceReplyFlags:
+ * @G_BUS_START_SERVICE_REPLY_ERROR: Error flag.
+ * @G_BUS_START_SERVICE_REPLY_SUCCESS: The service was successfully started.
+ * @G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING: A connection already owns the given name.
+ *
+ * Flags used in g_dbus_start_service_by_name().
+ *
+ * Since: 2.44
+ */
+typedef enum
+{
+  G_BUS_START_SERVICE_REPLY_ERROR = 0,
+  G_BUS_START_SERVICE_REPLY_SUCCESS = 1,
+  G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING = 2
+} GBusStartServiceReplyFlags;
 
 /**
  * GBusNameWatcherFlags:
@@ -1276,6 +1292,9 @@ typedef enum {
  * @G_DBUS_MESSAGE_FLAGS_NO_REPLY_EXPECTED: A reply is not expected.
  * @G_DBUS_MESSAGE_FLAGS_NO_AUTO_START: The bus must not launch an
  * owner for the destination name in response to this message.
+ * @G_DBUS_MESSAGE_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION: Inform the
+ * receiving side that the caller is prepared to wait for interactive
+ * authorization.
  *
  * Message flags used in #GDBusMessage.
  *
@@ -1284,7 +1303,8 @@ typedef enum {
 typedef enum {
   G_DBUS_MESSAGE_FLAGS_NONE = 0,
   G_DBUS_MESSAGE_FLAGS_NO_REPLY_EXPECTED = (1<<0),
-  G_DBUS_MESSAGE_FLAGS_NO_AUTO_START = (1<<1)
+  G_DBUS_MESSAGE_FLAGS_NO_AUTO_START = (1<<1),
+  G_DBUS_MESSAGE_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION = (1<<2)
 } GDBusMessageFlags;
 
 /**

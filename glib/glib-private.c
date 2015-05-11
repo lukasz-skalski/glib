@@ -47,7 +47,8 @@ glib__private__ (void)
     g_dir_new_from_dirp,
 
     g_variant_to_vectors,
-    g_variant_from_vectors
+    g_variant_from_vectors,
+    g_variant_vectors_deinit
   };
 
   return &table;

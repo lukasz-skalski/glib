@@ -27,6 +27,20 @@ g_variant_vectors_init (GVariantVectors *vectors)
   vectors->offsets = g_byte_array_new ();
 }
 
+void
+g_variant_vectors_deinit (GVariantVectors *vectors)
+{
+  int i;
+  for (i = 0; i < vectors->vectors->len; i++)
+    {
+      GVariantVector *v = &g_array_index (vectors->vectors, GVariantVector, i);
+      g_bytes_unref (v->gbytes);
+    }
+  g_byte_array_unref (vectors->extra_bytes);
+  g_array_unref (vectors->vectors);
+  g_byte_array_unref (vectors->offsets);
+}
+
 gsize
 g_variant_vectors_append_pad (GVariantVectors *vectors,
                               gsize            padding)

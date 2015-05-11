@@ -254,6 +254,10 @@ platform_libadd += xdgmime/libxdgmime.la
 platform_deps += xdgmime/libxdgmime.la
 unix_sources = \
 	gfiledescriptorbased.c  \
+	gkdbus.c		\
+	gkdbus.h		\
+	gkdbusfakedaemon.c	\
+	gkdbusfakedaemon.h	\
 	gunixconnection.c	\
 	gunixcredentialsmessage.c	\
 	gunixfdlist.c		\
@@ -402,7 +406,6 @@ libgio_2_0_la_SOURCES =		\
 	gioprivate.h		\
 	giowin32-priv.h 	\
 	gloadableicon.c 	\
-	gkdbus.c                \
 	gmount.c 		\
 	gmemoryinputstream.c 	\
 	gmemoryoutputstream.c 	\
@@ -581,7 +584,6 @@ gio_headers =			\
 	giomodule.h 		\
 	gioscheduler.h 		\
 	giostream.h		\
-	gkdbus.h                \
 	gloadableicon.h 	\
 	gmount.h 		\
 	gmemoryinputstream.h 	\

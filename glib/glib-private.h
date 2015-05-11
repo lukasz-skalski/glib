@@ -76,7 +76,7 @@ typedef struct {
                                                          gsize            n_vectors,
                                                          gsize size,
                                                          gboolean trusted);
-
+  void                  (* g_variant_vectors_deinit)    (GVariantVectors *vectors);
 
   /* Add other private functions here, initialize them in glib-private.c */
 } GLibPrivateVTable;

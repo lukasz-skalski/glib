@@ -343,16 +343,12 @@ print_names (GDBusConnection *c,
 
 static gboolean  opt_connection_system  = FALSE;
 static gboolean  opt_connection_session = FALSE;
-static gboolean  opt_connection_user    = FALSE;
-static gboolean  opt_connection_machine = FALSE;
 static gchar    *opt_connection_address = NULL;
 
 static const GOptionEntry connection_entries[] =
 {
   { "system", 'y', 0, G_OPTION_ARG_NONE, &opt_connection_system, N_("Connect to the system bus"), NULL},
   { "session", 'e', 0, G_OPTION_ARG_NONE, &opt_connection_session, N_("Connect to the session bus"), NULL},
-  { "machine", 'm', 0, G_OPTION_ARG_NONE, &opt_connection_machine, N_("Connect to the machine bus"), NULL},
-  { "user", 'u', 0, G_OPTION_ARG_NONE, &opt_connection_user, N_("Connect to the user bus"), NULL},
   { "address", 'a', 0, G_OPTION_ARG_STRING, &opt_connection_address, N_("Connect to given D-Bus address"), NULL},
   { NULL }
 };
@@ -377,18 +373,11 @@ static GDBusConnection *
 connection_get_dbus_connection (GError **error)
 {
   GDBusConnection *c;
-  guint count;
 
   c = NULL;
 
-  count = !!opt_connection_system +
-          !!opt_connection_session +
-          !!opt_connection_machine +
-          !!opt_connection_user +
-          !!opt_connection_address;
-
   /* First, ensure we have exactly one connect */
-  if (count == 0)
+  if (!opt_connection_system && !opt_connection_session && opt_connection_address == NULL)
     {
       g_set_error (error,
                    G_IO_ERROR,
@@ -396,7 +385,9 @@ connection_get_dbus_connection (GError **error)
                    _("No connection endpoint specified"));
       goto out;
     }
-  else if (count > 1)
+  else if ((opt_connection_system && (opt_connection_session || opt_connection_address != NULL)) ||
+           (opt_connection_session && (opt_connection_system || opt_connection_address != NULL)) ||
+           (opt_connection_address != NULL && (opt_connection_system || opt_connection_session)))
     {
       g_set_error (error,
                    G_IO_ERROR,
@@ -412,14 +403,6 @@ connection_get_dbus_connection (GError **error)
   else if (opt_connection_session)
     {
       c = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, error);
-    }
-  else if (opt_connection_machine)
-    {
-      c = g_bus_get_sync (G_BUS_TYPE_MACHINE, NULL, error);
-    }
-  else if (opt_connection_user)
-    {
-      c = g_bus_get_sync (G_BUS_TYPE_USER, NULL, error);
     }
   else if (opt_connection_address != NULL)
     {
@@ -613,7 +596,7 @@ handle_emit (gint        *argc,
             }
           else
             {
-              g_print ("--system \n--session \n--machine \n--user \n--address \n");
+              g_print ("--system \n--session \n--address \n");
             }
         }
       else
@@ -845,7 +828,7 @@ handle_call (gint        *argc,
             }
           else
             {
-              g_print ("--system \n--session \n--machine \n--user \n--address \n");
+              g_print ("--system \n--session \n--address \n");
             }
         }
       else
@@ -1580,7 +1563,7 @@ handle_introspect (gint        *argc,
             }
           else
             {
-              g_print ("--system \n--session \n--machine \n--user \n--address \n");
+              g_print ("--system \n--session \n--address \n");
             }
         }
       else
@@ -1808,7 +1791,7 @@ handle_monitor (gint        *argc,
             }
           else
             {
-              g_print ("--system \n--session \n--machine \n--user \n--address \n");
+              g_print ("--system \n--session \n--address \n");
             }
         }
       else

@@ -1,6 +1,6 @@
-/*  GIO - GLib Input, Output and Streaming Library
+/* GIO - GLib Input, Output and Streaming Library
  *
- * Copyright (C) 2013 Samsung Electronics
+ * Copyright (C) 2015 Samsung Electronics
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,8 +17,9 @@
  * Free Software Foundation, Inc., 59 Temple Place, Suite 330,
  * Boston, MA 02111-1307, USA.
  *
- * Author: Michal Eljasiewicz   <m.eljasiewic@samsung.com>
  * Author: Lukasz Skalski       <l.skalski@samsung.com>
+ * Author: Adrian Szyndela      <adrian.s@samsung.com>
+ * Author: Michal Eljasiewicz   <m.eljasiewic@samsung.com>
  */
 
 #include "config.h"
@@ -43,6 +44,11 @@
 #include <sys/uio.h>
 #endif
 
+#define DBUS_DAEMON_EMULATION
+#ifdef DBUS_DAEMON_EMULATION
+#include "gkdbusfakedaemon.h"
+#endif
+
 #include <glib/gstdio.h>
 #include <glib/glib-private.h>
 #include <gio/gio.h>
@@ -52,7 +58,7 @@
 #include "gunixfdmessage.h"
 
 #define KDBUS_MSG_MAX_SIZE         8192
-#define KDBUS_TIMEOUT_NS           2000000000LU
+#define KDBUS_DEFAULT_TIMEOUT_NS   2000000000LU
 #define KDBUS_POOL_SIZE            (16 * 1024LU * 1024LU)
 #define KDBUS_ALIGN8(l)            (((l) + 7) & ~7)
 #define KDBUS_ALIGN8_PTR(p)        ((void*) (uintptr_t)(p))
@@ -119,14 +125,6 @@ struct dbus_fixed_header {
     v2 += v1; v1=ROTL(v1,17); v1 ^= v2; v2=ROTL(v2,32); \
   } while(0)
 
-typedef enum
-{
-  G_BUS_CREDS_PID              = 1,
-  G_BUS_CREDS_UID              = 2,
-  G_BUS_CREDS_UNIQUE_NAME      = 3,
-  G_BUS_CREDS_SELINUX_CONTEXT  = 4
-} GBusCredentialsFlags;
-
 typedef GObjectClass GKDBusWorkerClass;
 
 struct _GKDBusWorker
@@ -136,10 +134,11 @@ struct _GKDBusWorker
   gint               fd;
 
   GMainContext      *context;
+  GMainLoop         *loop;
+  GThread           *thread;
   GSource           *source;
 
   gchar             *kdbus_buffer;
-
   gchar             *unique_name;
   guint64            unique_id;
 
@@ -157,6 +156,8 @@ struct _GKDBusWorker
 
   guchar             bus_id[16];
 
+  GList             *matches;
+
   GDBusCapabilityFlags                     capabilities;
   GDBusWorkerMessageReceivedCallback       message_received_callback;
   GDBusWorkerMessageAboutToBeSentCallback  message_about_to_be_sent_callback;
@@ -164,9 +165,14 @@ struct _GKDBusWorker
   gpointer                                 user_data;
 };
 
-static gssize _g_kdbus_receive (GKDBusWorker  *kdbus,
-                                GCancellable  *cancellable,
-                                GError       **error);
+static gboolean  _g_kdbus_send    (GKDBusWorker  *worker,
+                                   GDBusMessage  *message,
+                                   GDBusMessage **reply,
+                                   gint           timeout_msec,
+                                   GError       **error);
+
+static void      _g_kdbus_receive (GKDBusWorker  *worker,
+                                   GError       **error);
 
 G_DEFINE_TYPE (GKDBusWorker, g_kdbus_worker, G_TYPE_OBJECT)
 
@@ -197,6 +203,8 @@ enum {
   MATCH_ELEMENT_ARGNPATH,
 };
 
+static guint64 _global_match_cookie = 1;
+
 /* MatchElement struct */
 typedef struct {
   guint16 type;
@@ -208,12 +216,12 @@ typedef struct {
 typedef struct {
   int n_elements;
   MatchElement *elements;
+  guint64 cookie;
 } Match;
 
 
-/**
+/*
  * SipHash algorithm
- *
  */
 static void
 _g_siphash24 (guint8         out[8],
@@ -274,11 +282,8 @@ _g_siphash24 (guint8         out[8],
   U64TO8_LE (out, b);
 }
 
+/* ---------------------------------------------------------------------------------------------------- */
 
-/**
- * is_key()
- *
- */
 static gboolean
 is_key (const char *key_start, const char *key_end, char *value)
 {
@@ -290,11 +295,6 @@ is_key (const char *key_start, const char *key_end, char *value)
   return strncmp (key_start, value, len) == 0;
 }
 
-
-/**
- * parse_key()
- *
- */
 static gboolean
 parse_key (MatchElement *element, const char *key_start, const char *key_end)
 {
@@ -363,11 +363,6 @@ parse_key (MatchElement *element, const char *key_start, const char *key_end)
   return res;
 }
 
-
-/**
- * parse_value()
- *
- */
 static const char *
 parse_value (MatchElement *element, const char *s)
 {
@@ -432,11 +427,6 @@ parse_value (MatchElement *element, const char *s)
   return s;
 }
 
-
-/**
- * match_new()
- *
- */
 static Match *
 match_new (const char *str)
 {
@@ -492,6 +482,7 @@ match_new (const char *str)
   match = g_new0 (Match, 1);
   match->n_elements = elements->len;
   match->elements = (MatchElement *)g_array_free (elements, FALSE);
+  match->cookie = _global_match_cookie++;
 
   return match;
 
@@ -502,77 +493,42 @@ match_new (const char *str)
   return NULL;
 }
 
+static gboolean
+match_equal (Match *a, Match *b)
+{
+  int i;
 
-/**
- * match_free()
- *
- */
+  if (a->n_elements != b->n_elements)
+    return FALSE;
+
+  for (i = 0; i < a->n_elements; i++)
+    {
+      if (a->elements[i].type != b->elements[i].type ||
+          a->elements[i].arg != b->elements[i].arg ||
+          strcmp (a->elements[i].value, b->elements[i].value) != 0)
+        return FALSE;
+    }
+
+  return TRUE;
+}
+
 static void
 match_free (Match *match)
 {
   int i;
+
   for (i = 0; i < match->n_elements; i++)
     g_free (match->elements[i].value);
+
   g_free (match->elements);
   g_free (match);
 }
 
+/* ---------------------------------------------------------------------------------------------------- */
 
-/**
- * g_kdbus_finalize:
- *
+/*
+ * _g_kdbus_open
  */
-static void
-g_kdbus_worker_finalize (GObject *object)
-{
-  GKDBusWorker *kdbus = G_KDBUS_WORKER (object);
-
-  if (kdbus->kdbus_buffer != NULL)
-    munmap (kdbus->kdbus_buffer, KDBUS_POOL_SIZE);
-
-  kdbus->kdbus_buffer = NULL;
-
-  if (kdbus->fd != -1 && !kdbus->closed)
-    _g_kdbus_close (kdbus);
-
-  G_OBJECT_CLASS (g_kdbus_worker_parent_class)->finalize (object);
-}
-
-static void
-g_kdbus_worker_class_init (GKDBusWorkerClass *class)
-{
-  class->finalize = g_kdbus_worker_finalize;
-}
-
-static void
-g_kdbus_worker_init (GKDBusWorker *kdbus)
-{
-  kdbus->fd = -1;
-
-  kdbus->unique_id = -1;
-  kdbus->unique_name = NULL;
-
-  kdbus->kdbus_buffer = NULL;
-
-  kdbus->flags = KDBUS_HELLO_ACCEPT_FD;
-  kdbus->attach_flags_send = _KDBUS_ATTACH_ALL;
-  kdbus->attach_flags_recv = _KDBUS_ATTACH_ALL;
-}
-
-static gboolean
-kdbus_ready (gint         fd,
-             GIOCondition condition,
-             gpointer     user_data)
-{
-  GKDBusWorker *kdbus = user_data;
-  GError *error = NULL;
-
-  _g_kdbus_receive (kdbus, NULL, &error);
-  g_assert_no_error (error);
-
-  return G_SOURCE_CONTINUE;
-}
-
 gboolean
 _g_kdbus_open (GKDBusWorker  *worker,
                const gchar   *address,
@@ -593,32 +549,83 @@ _g_kdbus_open (GKDBusWorker  *worker,
 }
 
 
-/**
- * g_kdbus_free_data:
- *
+/*
+ * _g_kdbus_close
  */
-static gboolean
-g_kdbus_free_data (GKDBusWorker      *kdbus,
-                   guint64      offset)
+gboolean
+_g_kdbus_close (GKDBusWorker *worker)
+{
+  g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), FALSE);
+
+  if (worker->closed)
+    return TRUE;
+
+  g_source_destroy (worker->source);
+  worker->source = 0;
+
+  g_main_context_unref (worker->context);
+  worker->context = NULL;
+
+  g_main_loop_quit (worker->loop);
+  g_main_loop_unref (worker->loop);
+  worker->loop = NULL;
+
+  /* g_thread_join (worker->thread); FIXME */
+  g_thread_unref (worker->thread);
+  worker->thread = NULL;
+
+  close (worker->fd);
+  worker->fd = -1;
+
+  worker->closed = TRUE;
+  return TRUE;
+}
+
+
+/*
+ * _g_kdbus_is_closed
+ */
+gboolean
+_g_kdbus_is_closed (GKDBusWorker *worker)
+{
+  g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), FALSE);
+
+  return worker->closed;
+}
+
+static void
+g_kdbus_free_data (GKDBusWorker  *worker,
+                   guint64        offset)
 {
   struct kdbus_cmd_free cmd = {
     .size = sizeof(cmd),
     .offset = offset,
     .flags = 0
   };
-  int ret;
 
-  ret = ioctl (kdbus->fd, KDBUS_CMD_FREE, &cmd);
-  if (ret < 0)
-    return FALSE;
+  ioctl (worker->fd, KDBUS_CMD_FREE, &cmd);
+}
 
-  return TRUE;
+static void
+g_kdbus_close_msg (GKDBusWorker      *worker,
+                   struct kdbus_msg  *msg)
+{
+  struct kdbus_item *item;
+  guint64 offset;
+
+  KDBUS_ITEM_FOREACH (item, msg, items)
+    {
+      if (item->type == KDBUS_ITEM_PAYLOAD_MEMFD)
+        close (item->memfd.fd);
+    }
+
+  offset = (guint8 *)msg - (guint8 *)worker->kdbus_buffer;
+  g_kdbus_free_data (worker, offset);
 }
 
 
-/**
- * g_kdbus_translate_nameowner_flags:
- *
+/*
+ * g_kdbus_translate_nameowner_flags
  */
 static void
 g_kdbus_translate_nameowner_flags (GBusNameOwnerFlags   flags,
@@ -640,51 +647,20 @@ g_kdbus_translate_nameowner_flags (GBusNameOwnerFlags   flags,
   *kdbus_flags = new_flags;
 }
 
+/* ---------------------------------------------------------------------------------------------------- */
 
-/**
- * _g_kdbus_close:
+/* < internal >
  *
- */
-void
-_g_kdbus_close (GKDBusWorker *kdbus)
-{
-  g_return_val_if_fail (G_IS_KDBUS_WORKER (kdbus), FALSE);
-
-  if (kdbus->closed)
-    return;
-
-  g_source_destroy (kdbus->source);
-  kdbus->source = 0;
-
-  g_main_context_unref (kdbus->context);
-  kdbus->context = NULL;
-
-  close (kdbus->fd);
-  kdbus->fd = -1;
-
-  kdbus->closed = TRUE;
-}
-
-/**
- * _g_kdbus_is_closed:
- *
- */
-gboolean
-_g_kdbus_is_closed (GKDBusWorker  *kdbus)
-{
-  g_return_val_if_fail (G_IS_KDBUS_WORKER (kdbus), FALSE);
-
-  return kdbus->closed;
-}
-
-
-/**
  * _g_kdbus_Hello:
  *
+ * Gets the unique name.
+ *
+ * Returns: the unique name or NULL. Do not free this string,
+ * it is owned by GKDBusWorker.
  */
-GVariant *
-_g_kdbus_Hello (GKDBusWorker *worker,
-                GError    **error)
+const gchar *
+_g_kdbus_Hello (GKDBusWorker  *worker,
+                GError       **error)
 {
   struct kdbus_cmd_hello *cmd;
   struct kdbus_bloom_parameter *bloom;
@@ -711,6 +687,14 @@ _g_kdbus_Hello (GKDBusWorker *worker,
   item->type = KDBUS_ITEM_CONN_DESCRIPTION;
   memcpy (item->str, conn_name, conn_name_size+1);
   item = KDBUS_ITEM_NEXT (item);
+
+  if (worker->unique_id != -1)
+    {
+      g_set_error (error, G_DBUS_ERROR,
+                   G_DBUS_ERROR_FAILED,
+                   "Already handled an Hello message");
+      return NULL;
+    }
 
   if (ioctl(worker->fd, KDBUS_CMD_HELLO, cmd))
     {
@@ -743,7 +727,7 @@ _g_kdbus_Hello (GKDBusWorker *worker,
   memcpy (worker->bus_id, cmd->id128, 16);
 
   worker->unique_id = cmd->id;
-  asprintf(&worker->unique_name, ":1.%llu", (unsigned long long) cmd->id);
+  asprintf (&worker->unique_name, ":1.%llu", (unsigned long long) cmd->id);
 
   /* read bloom filters parameters */
   bloom = NULL;
@@ -772,26 +756,31 @@ _g_kdbus_Hello (GKDBusWorker *worker,
       return NULL;
     }
 
-
-  return g_variant_new ("(s)", worker->unique_name);
+  return worker->unique_name;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_RequestName:
  *
+ * Synchronously acquires name on the bus and returns status code
+ * from the GBusRequestNameReplyFlags enumeration.
+ *
+ * Returns: status code or G_BUS_REQUEST_NAME_FLAGS_ERROR
+ * if error is set.
  */
-GVariant *
+GBusRequestNameReplyFlags
 _g_kdbus_RequestName (GKDBusWorker        *worker,
                       const gchar         *name,
                       GBusNameOwnerFlags   flags,
                       GError             **error)
 {
-  GVariant *result;
+  GBusRequestNameReplyFlags status;
   struct kdbus_cmd *cmd;
   guint64 kdbus_flags;
   gssize len, size;
-  gint status, ret;
+  gint ret;
 
   status = G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER;
 
@@ -801,7 +790,16 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      return G_BUS_REQUEST_NAME_FLAGS_ERROR;
+    }
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_INVALID_ARGS,
+                   "Cannot acquire a service named '%s', because that is reserved", name);
+      return G_BUS_REQUEST_NAME_FLAGS_ERROR;
     }
 
   if (*name == ':')
@@ -810,7 +808,7 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Cannot acquire a service starting with ':' such as \"%s\"", name);
-      return NULL;
+      return G_BUS_REQUEST_NAME_FLAGS_ERROR;
     }
 
   g_kdbus_translate_nameowner_flags (flags, &kdbus_flags);
@@ -837,32 +835,36 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                        g_io_error_from_errno (errno),
                        _("Error while acquiring name: %s"),
                        g_strerror (errno));
-          return NULL;
+          return G_BUS_REQUEST_NAME_FLAGS_ERROR;
         }
     }
 
   if (cmd->return_flags & KDBUS_NAME_IN_QUEUE)
     status = G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE;
 
-  result = g_variant_new ("(u)", status);
-
-  return result;
+  return status;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_ReleaseName:
  *
+ * Synchronously releases name on the bus and returns status code
+ * from the GBusReleaseNameReplyFlags enumeration.
+ *
+ * Returns: status code or G_BUS_RELEASE_NAME_FLAGS_ERROR
+ * if error is set.
  */
-GVariant *
-_g_kdbus_ReleaseName (GKDBusWorker     *worker,
-                      const gchar         *name,
-                      GError             **error)
+GBusReleaseNameReplyFlags
+_g_kdbus_ReleaseName (GKDBusWorker  *worker,
+                      const gchar   *name,
+                      GError       **error)
 {
-  GVariant *result;
+  GBusReleaseNameReplyFlags status;
   struct kdbus_cmd *cmd;
   gssize len, size;
-  gint status, ret;
+  gint ret;
 
   status = G_BUS_RELEASE_NAME_FLAGS_RELEASED;
 
@@ -872,7 +874,16 @@ _g_kdbus_ReleaseName (GKDBusWorker     *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      return G_BUS_RELEASE_NAME_FLAGS_ERROR;
+    }
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_INVALID_ARGS,
+                   "Cannot release a service named '%s', because that is owned by the bus", name);
+      return G_BUS_RELEASE_NAME_FLAGS_ERROR;
     }
 
   if (*name == ':')
@@ -881,7 +892,7 @@ _g_kdbus_ReleaseName (GKDBusWorker     *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Cannot release a service starting with ':' such as \"%s\"", name);
-      return NULL;
+      return G_BUS_RELEASE_NAME_FLAGS_ERROR;
     }
 
   len = strlen(name) + 1;
@@ -905,62 +916,87 @@ _g_kdbus_ReleaseName (GKDBusWorker     *worker,
                        g_io_error_from_errno (errno),
                        _("Error while releasing name: %s"),
                        g_strerror (errno));
-          return NULL;
+          return G_BUS_RELEASE_NAME_FLAGS_ERROR;
         }
     }
 
-  result = g_variant_new ("(u)", status);
-
-  return result;
+  return status;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetBusId:
  *
+ * Synchronously returns the unique ID of the bus.
+ *
+ * Returns: the unique ID of the bus or NULL if error is set.
+ * Free with g_free().
  */
-GVariant *
+gchar *
 _g_kdbus_GetBusId (GKDBusWorker  *worker,
-                   GError          **error)
+                   GError       **error)
 {
-  GVariant *result;
-  GString  *result_str;
+  GString  *result;
   guint     cnt;
 
-  result_str = g_string_new (NULL);
+  result = g_string_new (NULL);
 
   for (cnt=0; cnt<16; cnt++)
-    g_string_append_printf (result_str, "%02x", worker->bus_id[cnt]);
+    g_string_append_printf (result, "%02x", worker->bus_id[cnt]);
 
-  result = g_variant_new ("(s)", result_str->str);
-  g_string_free (result_str, TRUE);
-
-  return result;
+  return g_string_free (result, FALSE);
 }
 
 
-/**
+static void
+expand_strv (gchar  ***strv_ptr,
+             gchar    *value)
+{
+  gchar **strv;
+  guint strv_len;
+
+  if (!value)
+    return;
+
+  strv = *strv_ptr;
+  strv_len = g_strv_length (strv);
+
+  strv = g_renew (gchar *, strv, strv_len + 2);
+  strv[strv_len] = value;
+  strv[strv_len + 1] = NULL;
+
+  *strv_ptr = strv;
+}
+
+
+/* < internal >
+ *
  * _g_kdbus_GetListNames:
  *
+ * Synchronously returns a list of:
+ *   - all currently-owned names on the bus (activatable = FALSE),
+ *   - all names that can be activated on the bus (activatable = TRUE),
+ *
+ * or NULL if error is set. Free with g_strfreev().
  */
-GVariant *
+gchar **
 _g_kdbus_GetListNames (GKDBusWorker  *worker,
-                       guint             list_name_type,
-                       GError          **error)
+                       gboolean       activatable,
+                       GError       **error)
 {
-  GVariant *result;
-  GVariantBuilder *builder;
   struct kdbus_info *name_list, *name;
   struct kdbus_cmd_list cmd = {
     .size = sizeof(cmd)
   };
 
+  gchar **listnames;
   guint64 prev_id;
   gint ret;
 
   prev_id = 0;
 
-  if (list_name_type)
+  if (activatable)
     cmd.flags = KDBUS_LIST_ACTIVATORS;                /* ListActivatableNames */
   else
     cmd.flags = KDBUS_LIST_UNIQUE | KDBUS_LIST_NAMES; /* ListNames */
@@ -975,51 +1011,49 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
       return NULL;
     }
 
+  listnames = g_new0 (gchar *, 1);
   name_list = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd.offset);
-  builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
 
-  KDBUS_FOREACH(name, name_list, cmd.list_size)
+  KDBUS_FOREACH (name, name_list, cmd.list_size)
     {
       struct kdbus_item *item;
-      const gchar *item_name = "";
 
       if ((cmd.flags & KDBUS_LIST_UNIQUE) && name->id != prev_id)
         {
-          GString *unique_name;
+          gchar *unique_name;
 
-          unique_name = g_string_new (NULL);
-          g_string_printf (unique_name, ":1.%llu", name->id);
-          g_variant_builder_add (builder, "s", unique_name->str);
-          g_string_free (unique_name,TRUE);
+          asprintf (&unique_name, ":1.%llu", name->id);
+          expand_strv (&listnames, unique_name);
           prev_id = name->id;
         }
 
-       KDBUS_ITEM_FOREACH(item, name, items)
-         if (item->type == KDBUS_ITEM_OWNED_NAME)
-           item_name = item->name.name;
-
-        if (g_dbus_is_name (item_name))
-          g_variant_builder_add (builder, "s", item_name);
+       KDBUS_ITEM_FOREACH (item, name, items)
+         {
+           if (item->type == KDBUS_ITEM_OWNED_NAME)
+             {
+               if (g_dbus_is_name (item->name.name))
+                 expand_strv (&listnames, g_strdup (item->name.name));
+             }
+         }
     }
 
-  result = g_variant_new ("(as)", builder);
-  g_variant_builder_unref (builder);
+  /* org.freedesktop.DBus.ListNames */
+  if (!activatable)
+    expand_strv (&listnames, g_strdup ("org.freedesktop.DBus"));
 
   g_kdbus_free_data (worker, cmd.offset);
-  return result;
+
+  return listnames;
 }
 
 
-/**
- * _g_kdbus_NameHasOwner_internal:
- *
- */
 static gboolean
-g_kdbus_NameHasOwner_internal (GKDBusWorker       *worker,
-                               const gchar  *name,
-                               GError      **error)
+g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
+                               const gchar   *name,
+                               GError       **error)
 {
   struct kdbus_cmd_info *cmd;
+  struct kdbus_info *conn_info;
   gssize size, len;
   gint ret;
 
@@ -1041,6 +1075,11 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker       *worker,
   cmd->size = size;
 
   ret = ioctl(worker->fd, KDBUS_CMD_CONN_INFO, cmd);
+  conn_info = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd->offset);
+
+  if (conn_info->flags & KDBUS_HELLO_ACTIVATOR)
+    ret = -1;
+
   g_kdbus_free_data (worker, cmd->offset);
 
   if (ret < 0)
@@ -1050,25 +1089,29 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker       *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetListQueuedOwners:
  *
+ * Synchronously returns the unique bus names of connections currently
+ * queued for the name.
+ *
+ * Returns: the unique bus names of connections currently queued for the
+ * 'name' or NULL if error is set. Free with g_strfreev().
  */
-GVariant *
+gchar **
 _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
                               const gchar   *name,
                               GError       **error)
 {
-  GVariant *result;
-  GVariantBuilder *builder;
-  GString *unique_name;
-  gint ret;
-
   struct kdbus_info *name_list, *kname;
   struct kdbus_cmd_list cmd = {
     .size = sizeof(cmd),
     .flags = KDBUS_LIST_QUEUED
   };
+
+  gchar **queued_owners;
+  gint ret;
 
   if (!g_dbus_is_name (name))
     {
@@ -1098,54 +1141,81 @@ _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
       return NULL;
     }
 
+  queued_owners = g_new0 (gchar *, 1);
   name_list = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd.offset);
 
-  unique_name = g_string_new (NULL);
-  builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
   KDBUS_FOREACH(kname, name_list, cmd.list_size)
     {
       struct kdbus_item *item;
-      const char *item_name = "";
 
       KDBUS_ITEM_FOREACH(item, kname, items)
-        if (item->type == KDBUS_ITEM_NAME)
-          item_name = item->str;
+        {
+          if (item->type == KDBUS_ITEM_OWNED_NAME)
+            {
+              gchar *unique_name;
 
-      if (strcmp(item_name, name))
-        continue;
+              if (strcmp(item->name.name, name))
+                continue;
 
-      g_string_printf (unique_name, ":1.%llu", kname->id);
-      g_variant_builder_add (builder, "s", item_name);
+              if (asprintf (&unique_name, ":1.%llu", kname->id) != -1)
+                expand_strv (&queued_owners, unique_name);
+            }
+        }
     }
 
-  result = g_variant_new ("(as)", builder);
-  g_variant_builder_unref (builder);
-  g_string_free (unique_name,TRUE);
-
   g_kdbus_free_data (worker, cmd.offset);
-  return result;
+
+  return queued_owners;
 }
 
 
-/**
- * g_kdbus_GetConnInfo_internal:
+/* < internal >
  *
+ * _g_kdbus_NameHasOwner:
+ *
+ * Checks if the specified name exists (currently has an owner).
+ *
+ * Returns: TRUE if the name exists and FALSE when name doesn't exists
+ * or error is set.
  */
-static GVariant *
-g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
-                              const gchar      *name,
-                              guint64           flag,
-                              GError          **error)
+gboolean
+_g_kdbus_NameHasOwner (GKDBusWorker  *worker,
+                       const gchar   *name,
+                       GError       **error)
 {
-  GVariant *result;
+  if (!g_dbus_is_name (name))
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_INVALID_ARGS,
+                   "Given bus name \"%s\" is not valid", name);
+      return FALSE;
+    }
 
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return  TRUE;
+
+  if (!g_kdbus_NameHasOwner_internal (worker, name, error))
+    return FALSE;
+  else
+    return TRUE;
+}
+
+
+GDBusCredentials *
+_g_kdbus_GetConnInfo (GKDBusWorker  *worker,
+                      const gchar   *name,
+                      guint          flags,
+                      GError       **error)
+{
+  GDBusCredentials *creds;
   struct kdbus_cmd_info *cmd;
   struct kdbus_info *conn_info;
   struct kdbus_item *item;
   gssize size, len;
   gint ret;
 
-  result = NULL;
+  creds = g_new0 (GDBusCredentials, 1);
 
   if (!g_dbus_is_name (name))
     {
@@ -1153,7 +1223,7 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      goto error;
     }
 
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
@@ -1162,7 +1232,7 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_NAME_HAS_NO_OWNER,
                    "Could not get owner of name '%s': no such name", name);
-      return NULL;
+      goto error;
     }
 
   if (g_dbus_is_unique_name(name))
@@ -1191,25 +1261,15 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_FAILED,
                    _("Could not get connection info"));
-      return NULL;
+      goto error;
     }
 
   conn_info = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd->offset);
 
-  /*
-  if (conn_info->flags & KDBUS_HELLO_ACTIVATOR)
-    {}
-  */
-
-  if (flag == G_BUS_CREDS_UNIQUE_NAME)
+  if (flags & G_DBUS_CREDS_UNIQUE_NAME)
     {
-       GString *unique_name;
-
-       unique_name = g_string_new (NULL);
-       g_string_printf (unique_name, ":1.%llu", (unsigned long long) conn_info->id);
-       result = g_variant_new ("(s)", unique_name->str);
-       g_string_free (unique_name,TRUE);
-       goto exit;
+       asprintf (&creds->unique_name, ":1.%llu", (unsigned long long) conn_info->id);
+       //TODO: Error handling
     }
 
   KDBUS_ITEM_FOREACH(item, conn_info, items)
@@ -1217,24 +1277,20 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
       switch (item->type)
         {
           case KDBUS_ITEM_PIDS:
-
-            if (flag == G_BUS_CREDS_PID)
-              {
-                guint pid = item->pids.pid;
-                result = g_variant_new ("(u)", pid);
-                goto exit;
-              }
+            if (flags & G_DBUS_CREDS_PID)
+              creds->pid = item->pids.pid;
+          break;
 
           case KDBUS_ITEM_CREDS:
-
-            if (flag == G_BUS_CREDS_UID)
-              {
-                guint uid = item->creds.uid;
-                result = g_variant_new ("(u)", uid);
-                goto exit;
-              }
+            if (flags & G_DBUS_CREDS_UID)
+              creds->uid = item->creds.uid;
+          break;
 
           case KDBUS_ITEM_SECLABEL:
+            if (flags & G_DBUS_CREDS_SEC_LABEL)
+              creds->sec_label = g_strdup (item->str);
+          break;
+
           case KDBUS_ITEM_PID_COMM:
           case KDBUS_ITEM_TID_COMM:
           case KDBUS_ITEM_EXE:
@@ -1249,68 +1305,245 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
         }
    }
 
-exit:
   g_kdbus_free_data (worker, cmd->offset);
-  return result;
+  return creds;
+
+error:
+  g_free (creds->unique_name);
+  g_free (creds->sec_label);
+  g_free (creds);
+  return NULL;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetNameOwner:
  *
+ * Synchronously returns the unique connection name of the primary owner of
+ * the name given. If the requested name doesn't have an owner, an error is
+ * returned.
+ *
+ * Returns: the unique connection name of the primary owner of the
+ * name given. If the requested name doesn't have an owner, function
+ * returns NULL and error is set. Free with g_free().
  */
-GVariant *
+gchar *
 _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
-                       const gchar      *name,
-                       GError          **error)
+                       const gchar   *name,
+                       GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_UNIQUE_NAME,
-                                       error);
+  GDBusCredentials *creds;
+  gchar *unique_name;
+  guint flags;
+
+  creds = NULL;
+  unique_name = NULL;
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return g_strdup (name);
+
+  flags = G_DBUS_CREDS_UNIQUE_NAME;
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
+  if (creds != NULL)
+    {
+      unique_name = creds->unique_name;
+      g_free (creds);
+    }
+
+  return unique_name;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetConnectionUnixProcessID:
  *
+ * Synchronously returns the Unix process ID of the process connected to the
+ * bus. If unable to determine it, an error is returned.
+ *
+ * If name contains a value not compatible with the D-Bus syntax and naming
+ * conventions for bus names, the operation returns -1 and error is set.
+ *
+ * Returns: the Unix process ID of the process connected to the bus or -1
+ * if error is set.
  */
-GVariant *
+pid_t
 _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
-                                     const gchar      *name,
-                                     GError          **error)
+                                     const gchar   *name,
+                                     GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_PID,
-                                       error);
+  GDBusCredentials *creds;
+  guint flags;
+  pid_t pid;
+
+  creds = NULL;
+  pid = -1;
+
+  flags = G_DBUS_CREDS_PID;
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
+  if (creds != NULL)
+    {
+      pid = creds->pid;
+      g_free (creds);
+    }
+
+  return pid;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetConnectionUnixUser:
  *
+ * Synchronously returns the Unix user ID of the process connected to the
+ * bus. If unable to determine it, an error is returned.
+ *
+ * If name contains a value not compatible with the D-Bus syntax and naming
+ * conventions for bus names, the operation returns -1 and error is set.
+ *
+ * Returns: the Unix user ID of the process connected to the bus or -1
+ * if error is set.
  */
-GVariant *
+uid_t
 _g_kdbus_GetConnectionUnixUser (GKDBusWorker  *worker,
-                                const gchar      *name,
-                                GError          **error)
+                                const gchar   *name,
+                                GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_UID,
-                                       error);
+  GDBusCredentials *creds;
+  guint flags;
+  uid_t uid;
+
+  creds = NULL;
+  uid = -1;
+
+  flags = G_DBUS_CREDS_UID;
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
+  if (creds != NULL)
+    {
+      uid = creds->uid;
+      g_free (creds);
+    }
+
+  return uid;
 }
 
 
-/**
+/* < internal >
+ *
+ * _g_kdbus_GetConnectionSecurityLabel:
+ *
+ * Synchronously returns security label of the process connected to the bus.
+ *
+ * If name contains a value not compatible with the D-Bus syntax and naming
+ * conventions for bus names, the operation returns -1 and error is set.
+ *
+ * Returns: security label of the process connected to the bus or -1
+ */
+gchar *
+_g_kdbus_GetConnectionSecurityLabel (GKDBusWorker  *worker,
+                                     const gchar   *name,
+                                     GError       **error)
+{
+  GDBusCredentials *creds;
+  gchar *sec_label;
+  guint flags;
+
+  creds = NULL;
+  sec_label = NULL;
+
+  flags = G_DBUS_CREDS_SEC_LABEL;
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
+  if (creds != NULL)
+    {
+      sec_label = creds->sec_label;
+      g_free (creds);
+    }
+
+  return sec_label;
+}
+
+
+/* < internal >
+ *
+ * _g_kdbus_StartServiceByName:
+ *
+ * Synchronously tries to launch the executable associated
+ * with a name.
+ *
+ * Returns: status code or G_BUS_START_SERVICE_REPLY_ERROR
+   if error is set.
+ */
+GBusStartServiceReplyFlags
+_g_kdbus_StartServiceByName (GKDBusWorker  *worker,
+                             const gchar   *name,
+                             guint32        flags,
+                             GError       **error)
+{
+  GBusStartServiceReplyFlags status;
+
+  if (!g_dbus_is_name (name))
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_INVALID_ARGS,
+                   "Given bus name \"%s\" is not valid", name);
+      return G_BUS_START_SERVICE_REPLY_ERROR;
+    }
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING;
+
+  if (!g_kdbus_NameHasOwner_internal (worker, name, error))
+    {
+      GDBusMessage *message;
+      GDBusMessage *reply;
+      gint ret;
+
+      reply = NULL;
+
+      message = g_dbus_message_new_method_call (name, "/", "org.freedesktop.DBus.Peer", "Ping");
+      g_dbus_message_set_serial (message, -1);
+
+      ret = _g_kdbus_send (worker, message, &reply, 25000, NULL);
+      if (!ret)
+        {
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_SERVICE_UNKNOWN,
+                       "The name %s was not provided by any .service files", name);
+          return G_BUS_START_SERVICE_REPLY_ERROR;
+        }
+      g_object_unref (reply);
+      status = G_BUS_START_SERVICE_REPLY_SUCCESS;
+    }
+  else
+    status = G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING;
+
+  return status;
+}
+
+
+/*
  * g_kdbus_bloom_add_data:
  * Based on bus-bloom.c from systemd
  * http://cgit.freedesktop.org/systemd/systemd/tree/src/libsystemd/sd-bus/bus-bloom.c
  */
 static void
 g_kdbus_bloom_add_data (GKDBusWorker  *worker,
-                        guint64        bloom_data [],
+                        guint64        bloom_data[],
                         const void    *data,
                         gsize          n)
 {
@@ -1347,14 +1580,9 @@ g_kdbus_bloom_add_data (GKDBusWorker  *worker,
     }
 }
 
-
-/**
- * g_kdbus_bloom_add_pair:
- *
- */
 static void
 g_kdbus_bloom_add_pair (GKDBusWorker  *worker,
-                        guint64        bloom_data [],
+                        guint64        bloom_data[],
                         const gchar   *parameter,
                         const gchar   *value)
 {
@@ -1369,14 +1597,9 @@ g_kdbus_bloom_add_pair (GKDBusWorker  *worker,
   g_kdbus_bloom_add_data(worker, bloom_data, buf, size);
 }
 
-
-/**
- * g_kdbus_bloom_add_prefixes:
- *
- */
 static void
 g_kdbus_bloom_add_prefixes (GKDBusWorker  *worker,
-                            guint64        bloom_data [],
+                            guint64        bloom_data[],
                             const gchar   *parameter,
                             const gchar   *value,
                             gchar          separator)
@@ -1403,14 +1626,20 @@ g_kdbus_bloom_add_prefixes (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_AddMatch:
  *
+ * Synchronously adds a match rule to match messages.
+ *
+ * Returns: TRUE if the operation succeeded, FALSE
+ * if error is set.
+ *
  */
-void
+gboolean
 _g_kdbus_AddMatch (GKDBusWorker  *worker,
                    const gchar   *match_rule,
-                   guint64        cookie)
+                   GError       **error)
 {
   Match *match;
   MatchElement *element;
@@ -1424,13 +1653,22 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
   gint cnt, ret;
 
   if (match_rule[0] == '-')
-    return;
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
 
   match = match_new (match_rule);
   if (!match)
     {
-      match_free (match);
-      return;
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
     }
 
   sender_name = NULL;
@@ -1438,7 +1676,6 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
 
   bloom = g_alloca0 (worker->bloom_size);
   size = KDBUS_ALIGN8 (G_STRUCT_OFFSET (struct kdbus_cmd_match, items));
-  match = match_new (match_rule);
 
   for (cnt = 0; cnt < match->n_elements; cnt++)
     {
@@ -1459,9 +1696,12 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
               }
             else
               {
-                g_critical ("Error while adding a match");
+                g_set_error (error,
+                             G_DBUS_ERROR,
+                             G_DBUS_ERROR_MATCH_RULE_INVALID,
+                             "Invalid rule: %s", match_rule);
                 match_free (match);
-                return;
+                return FALSE;
               }
             break;
 
@@ -1511,7 +1751,7 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
   size += KDBUS_ALIGN8 (G_STRUCT_OFFSET (struct kdbus_item, data64) + worker->bloom_size);
   cmd = g_alloca0 (size);
   cmd->size = size;
-  cmd->cookie = cookie;
+  cmd->cookie = match->cookie;
 
   item = cmd->items;
   item->size = G_STRUCT_OFFSET(struct kdbus_item, data64) + worker->bloom_size;
@@ -1536,47 +1776,114 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
 
   ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
   if (ret < 0)
-    g_warning ("Error while adding a match: %d", (int) errno);
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_FAILED,
+                   "Error while adding a match");
+      match_free (match);
+      return FALSE;
+    }
 
-  match_free (match);
+  worker->matches = g_list_prepend (worker->matches, match);
+  return TRUE;
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_RemoveMatch:
  *
+ * Synchronously removes the first rule that matches.
+ *
+ * Returns: TRUE if the operation succeeded, FALSE
+ * if error is set.
  */
-void
+gboolean
 _g_kdbus_RemoveMatch (GKDBusWorker  *worker,
-                      guint64        cookie)
+                      const gchar   *match_rule,
+                      GError       **error)
 {
-  struct kdbus_cmd_match cmd = {
-    .size = sizeof(cmd),
-    .cookie = cookie
-  };
-  gint ret;
+  Match *match, *other_match;
+  GList *matches;
+  guint64 cookie;
 
-  g_print ("Unsubscribe match entry with cookie - %d\n", (int)cookie);
-
-  ret = ioctl(worker->fd, KDBUS_CMD_MATCH_REMOVE, &cmd);
-  if (ret < 0)
+  if (match_rule[0] == '-')
     {
-      g_warning ("Error while removing a match: %d\n", errno);
-      return;
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
     }
+
+  match = match_new (match_rule);
+  if (!match)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      match_free (match);
+      return FALSE;
+    }
+
+  for (matches = worker->matches; matches != NULL; matches = matches->next)
+    {
+      other_match = matches->data;
+      if (match_equal (match, other_match))
+        {
+          cookie = other_match->cookie;
+          match_free (other_match);
+          worker->matches = g_list_delete_link (worker->matches, matches);
+          break;
+        }
+    }
+
+  if (matches == NULL)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_NOT_FOUND,
+                   "The given match rule wasn't found and can't be removed");
+      match_free (match);
+      return FALSE;
+    }
+  else
+    {
+      struct kdbus_cmd_match cmd = {
+        .size = sizeof(cmd),
+        .cookie = cookie
+      };
+      gint ret;
+
+      ret = ioctl(worker->fd, KDBUS_CMD_MATCH_REMOVE, &cmd);
+      if (ret < 0)
+        {
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_FAILED,
+                       "Error while removing a match");
+          match_free (match);
+          return FALSE;
+        }
+    }
+
+  match_free (match);
+  return TRUE;
 }
 
 
-/**
- * _g_kdbus_subscribe_name_owner_changed_internal:
- *
+/*
+ * _g_kdbus_subscribe_name_owner_changed_internal
  */
-static void
+static gboolean
 _g_kdbus_subscribe_name_owner_changed_internal (GKDBusWorker  *worker,
                                                 const gchar   *name,
                                                 const gchar   *old_name,
                                                 const gchar   *new_name,
-                                                guint64        cookie)
+                                                guint64        cookie,
+                                                GError       **error)
 {
   struct kdbus_item *item;
   struct kdbus_cmd_match *cmd;
@@ -1608,7 +1915,7 @@ _g_kdbus_subscribe_name_owner_changed_internal (GKDBusWorker  *worker,
       if (g_dbus_is_unique_name(old_name))
         old_id = strtoull (old_name + 3, NULL, 10);
       else
-        return;
+        return TRUE;
     }
 
   if (new_name == NULL)
@@ -1620,7 +1927,7 @@ _g_kdbus_subscribe_name_owner_changed_internal (GKDBusWorker  *worker,
       if (g_dbus_is_unique_name(new_name))
         new_id = strtoull (new_name + 3, NULL, 10);
       else
-        return;
+        return TRUE;
     }
 
   cmd = g_alloca0 (size);
@@ -1642,27 +1949,50 @@ _g_kdbus_subscribe_name_owner_changed_internal (GKDBusWorker  *worker,
   ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
   if (ret < 0)
     {
-      g_warning ("ERROR - %d\n", (int) errno);
-      return;
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_FAILED,
+                   "Error while adding a match");
+      return FALSE;
     }
+
+  return TRUE;
 }
 
 
-/**
- * _g_kdbus_subscribe_name_acquired:
- *
+/*
+ * _g_kdbus_subscribe_name_acquired
  */
-void
+gboolean
 _g_kdbus_subscribe_name_acquired (GKDBusWorker  *worker,
+                                  const gchar   *match_rule,
                                   const gchar   *name,
-                                  guint64        cookie)
+                                  GError       **error)
 {
+  Match *match;
   struct kdbus_item *item;
   struct kdbus_cmd_match *cmd;
   gssize size, len;
   gint ret;
 
-  g_print ("Subscribe 'NameAcquired': name - %s ; cookie - %d\n", name, (int)cookie);
+  if (match_rule[0] == '-')
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
+
+  match = match_new (match_rule);
+  if (!match)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
 
   if (name)
     len = strlen(name) + 1;
@@ -1675,7 +2005,7 @@ _g_kdbus_subscribe_name_acquired (GKDBusWorker  *worker,
 
   cmd = g_alloca0 (size);
   cmd->size = size;
-  cmd->cookie = cookie;
+  cmd->cookie = match->cookie;
   item = cmd->items;
 
   item->type = KDBUS_ITEM_NAME_ADD;
@@ -1692,29 +2022,58 @@ _g_kdbus_subscribe_name_acquired (GKDBusWorker  *worker,
   ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
   if (ret < 0)
     {
-      g_warning ("ERROR - %d\n", (int) errno);
-      return;
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_FAILED,
+                   "Error while adding a match");
+      match_free (match);
+      return FALSE;
     }
 
-  _g_kdbus_subscribe_name_owner_changed_internal (worker, name, NULL, worker->unique_name, cookie);
+  if (!_g_kdbus_subscribe_name_owner_changed_internal (worker, name, NULL, worker->unique_name, match->cookie, error))
+    {
+      match_free (match);
+      return FALSE;
+    }
+
+  worker->matches = g_list_prepend (worker->matches, match);
+  return TRUE;
 }
 
 
-/**
- * _g_kdbus_subscribe_name_lost:
- *
+/*
+ * _g_kdbus_subscribe_name_lost
  */
-void
+gboolean
 _g_kdbus_subscribe_name_lost (GKDBusWorker  *worker,
+                              const gchar   *match_rule,
                               const gchar   *name,
-                              guint64        cookie)
+                              GError       **error)
 {
+  Match *match;
   struct kdbus_item *item;
   struct kdbus_cmd_match *cmd;
   gssize size, len;
   gint ret;
 
-  g_print ("Subscribe 'NameLost': name - %s ; cookie - %d\n", name, (int)cookie);
+  if (match_rule[0] == '-')
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
+
+  match = match_new (match_rule);
+  if (!match)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
 
   if (name)
     len = strlen(name) + 1;
@@ -1727,7 +2086,7 @@ _g_kdbus_subscribe_name_lost (GKDBusWorker  *worker,
 
   cmd = g_alloca0 (size);
   cmd->size = size;
-  cmd->cookie = cookie;
+  cmd->cookie = match->cookie;
   item = cmd->items;
 
   item->type = KDBUS_ITEM_NAME_REMOVE;
@@ -1744,36 +2103,70 @@ _g_kdbus_subscribe_name_lost (GKDBusWorker  *worker,
   ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
   if (ret < 0)
     {
-      g_warning ("ERROR - %d\n", (int) errno);
-      return;
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_FAILED,
+                   "Error while adding a match");
+      match_free (match);
+      return FALSE;
     }
 
-  _g_kdbus_subscribe_name_owner_changed_internal (worker, name, worker->unique_name, NULL, cookie);
+  if (!_g_kdbus_subscribe_name_owner_changed_internal (worker, name, worker->unique_name, NULL, match->cookie, error))
+    {
+      match_free (match);
+      return FALSE;
+    }
+
+  worker->matches = g_list_prepend (worker->matches, match);
+  return TRUE;
 }
 
 
-/**
- * _g_kdbus_subscribe_name_owner_changed:
- *
+/*
+ * _g_kdbus_subscribe_name_owner_changed
  */
-void
+gboolean
 _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
+                                       const gchar   *match_rule,
                                        const gchar   *name,
-                                       guint64        cookie)
+                                       GError       **error)
 {
+  Match *match;
   struct kdbus_item *item;
   struct kdbus_cmd_match *cmd;
   gssize size, len;
   gint ret;
 
-  if (name != NULL)
-    if (!g_dbus_is_name (name))
-      {
-        g_warning ("ERROR\n");
-        return;
-      }
+  if (match_rule[0] == '-')
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
 
-  g_print ("Subscribe 'NameOwnerChanged': name - %s ; cookie - %d\n", name, (int)cookie);
+  match = match_new (match_rule);
+  if (!match)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_MATCH_RULE_INVALID,
+                   "Invalid rule: %s", match_rule);
+      return FALSE;
+    }
+
+  if (name != NULL)
+    {
+      if (!g_dbus_is_name (name))
+        {
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_MATCH_RULE_INVALID,
+                       "Invalid rule: %s", match_rule);
+          return FALSE;
+        }
+    }
 
   /* 'name' argument is missing or is a unique name */
   if (name == NULL || g_dbus_is_unique_name (name))
@@ -1784,7 +2177,7 @@ _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
 
       cmd = g_alloca0 (size);
       cmd->size = size;
-      cmd->cookie = cookie;
+      cmd->cookie = match->cookie;
       item = cmd->items;
 
       if (name)
@@ -1799,16 +2192,24 @@ _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
       ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
       if (ret < 0)
         {
-          g_warning ("ERROR - %d\n", (int) errno);
-          return;
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_FAILED,
+                       "Error while adding a match");
+          match_free (match);
+          return FALSE;
         }
 
       item->type = KDBUS_ITEM_ID_REMOVE;
       ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
       if (ret < 0)
         {
-          g_warning ("ERROR - %d\n", (int) errno);
-          return;
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_FAILED,
+                       "Error while adding a match");
+          match_free (match);
+          return FALSE;
         }
     }
 
@@ -1826,7 +2227,7 @@ _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
 
       cmd = g_alloca0 (size);
       cmd->size = size;
-      cmd->cookie = cookie;
+      cmd->cookie = match->cookie;
       item = cmd->items;
 
       item->name_change.old_id.id = KDBUS_MATCH_ID_ANY;
@@ -1841,46 +2242,59 @@ _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
       ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
       if (ret < 0)
         {
-          g_warning ("ERROR - %d\n", (int) errno);
-          return;
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_FAILED,
+                       "Error while adding a match");
+          match_free (match);
+          return FALSE;
         }
 
       item->type = KDBUS_ITEM_NAME_REMOVE;
       ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
       if (ret < 0)
         {
-          g_warning ("ERROR - %d\n", (int) errno);
-          return;
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_FAILED,
+                       "Error while adding a match");
+          match_free (match);
+          return FALSE;
         }
 
       item->type = KDBUS_ITEM_NAME_CHANGE;
       ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
       if (ret < 0)
         {
-          g_warning ("ERROR - %d\n", (int) errno);
-          return;
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_FAILED,
+                       "Error while adding a match");
+          match_free (match);
+          return FALSE;
         }
     }
+
+  worker->matches = g_list_prepend (worker->matches, match);
+  return TRUE;
 }
 
 
-/**
+/*
  * g_kdbus_setup_bloom:
  * Based on bus-bloom.c from systemd
  * http://cgit.freedesktop.org/systemd/systemd/tree/src/libsystemd/sd-bus/bus-bloom.c
  */
 static void
-g_kdbus_setup_bloom (GKDBusWorker                     *worker,
+g_kdbus_setup_bloom (GKDBusWorker               *worker,
                      GDBusMessage               *dbus_msg,
                      struct kdbus_bloom_filter  *bloom_filter)
 {
   GVariant *body;
-
   const gchar *message_type;
   const gchar *interface;
   const gchar *member;
   const gchar *path;
-
   void *bloom_data;
 
   body = g_dbus_message_get_body (dbus_msg);
@@ -1964,9 +2378,8 @@ g_kdbus_setup_bloom (GKDBusWorker                     *worker,
 }
 
 
-/**
- * g_kdbus_translate_id_change:
- *
+/*
+ * g_kdbus_translate_id_change
  */
 static void
 g_kdbus_translate_id_change (GKDBusWorker       *worker,
@@ -1995,9 +2408,8 @@ g_kdbus_translate_id_change (GKDBusWorker       *worker,
 }
 
 
-/**
- * g_kdbus_translate_name_change:
- *
+/*
+ * g_kdbus_translate_name_change
  */
 static void
 g_kdbus_translate_name_change (GKDBusWorker       *worker,
@@ -2079,9 +2491,8 @@ g_kdbus_translate_name_change (GKDBusWorker       *worker,
 }
 
 
-/**
- *
- *
+/*
+ * g_kdbus_translate_kernel_reply
  */
 static void
 g_kdbus_translate_kernel_reply (GKDBusWorker       *worker,
@@ -2112,13 +2523,12 @@ g_kdbus_translate_kernel_reply (GKDBusWorker       *worker,
 }
 
 
-/**
- * g_kdbus_decode_kernel_msg:
- *
+/*
+ * g_kdbus_decode_kernel_msg
  */
 static void
-g_kdbus_decode_kernel_msg (GKDBusWorker           *worker,
-                           struct kdbus_msg *msg)
+g_kdbus_decode_kernel_msg (GKDBusWorker      *worker,
+                           struct kdbus_msg  *msg)
 {
   struct kdbus_item *item = NULL;
 
@@ -2152,13 +2562,12 @@ g_kdbus_decode_kernel_msg (GKDBusWorker           *worker,
 }
 
 
-/**
- * g_kdbus_decode_dbus_msg:
- *
+/*
+ * g_kdbus_decode_dbus_msg
  */
 static GDBusMessage *
-g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
-                         struct kdbus_msg *msg)
+g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
+                         struct kdbus_msg  *msg)
 {
   GDBusMessage *message;
   struct kdbus_item *item;
@@ -2166,7 +2575,7 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
   GArray *body_vectors;
   gsize body_size;
   GVariant *body;
-  gchar *tmp;
+  gchar *sender;
   guint i;
   GVariant *parts[2];
   GVariantIter *fields_iter;
@@ -2179,23 +2588,18 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
 
   body_vectors = g_array_new (FALSE, FALSE, sizeof (GVariantVector));
 
-  tmp = g_strdup_printf (":1.%"G_GUINT64_FORMAT, (guint64) msg->src_id);
-  g_dbus_message_set_sender (message, tmp);
-  g_free (tmp);
-
   item = msg->items;
   body_size = 0;
 
   KDBUS_ITEM_FOREACH(item, msg, items)
     {
-      if (item->size <= KDBUS_ITEM_HEADER_SIZE)
+      if (item->size < KDBUS_ITEM_HEADER_SIZE)
         g_error("[KDBUS] %llu bytes - invalid data record\n", item->size);
 
       data_size = item->size - KDBUS_ITEM_HEADER_SIZE;
 
       switch (item->type)
         {
-         /* KDBUS_ITEM_DST_NAME */
          case KDBUS_ITEM_DST_NAME:
            /* Classic D-Bus doesn't make this known to the receiver, so
             * we don't do it here either (for compatibility with the
@@ -2203,7 +2607,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
             */
            break;
 
-        /* KDBUS_ITEM_PALOAD_OFF */
         case KDBUS_ITEM_PAYLOAD_OFF:
           {
             GVariantVector vector;
@@ -2247,7 +2650,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
           }
           break;
 
-        /* KDBUS_ITEM_PAYLOAD_MEMFD */
         case KDBUS_ITEM_PAYLOAD_MEMFD:
           {
             GVariantVector vector;
@@ -2267,7 +2669,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
           }
           break;
 
-        /* KDBUS_ITEM_FDS */
         case KDBUS_ITEM_FDS:
           {
             GUnixFDList *fd_list;
@@ -2282,23 +2683,7 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
            CGROUP, etc. need some GDBUS API extensions and
            should be implemented in the future */
         case KDBUS_ITEM_TIMESTAMP:
-          {
-            /* g_print ("time: seq %llu mon %llu real %llu\n",
-                     item->timestamp.seqnum, item->timestamp.monotonic_ns, item->timestamp.realtime_ns); */
-
-            //g_dbus_message_set_timestamp (message, item->timestamp.monotonic_ns / 1000);
-            //g_dbus_message_set_serial (message, item->timestamp.seqnum);
-            break;
-          }
-
         case KDBUS_ITEM_CREDS:
-          {
-            /* g_print ("creds: u%llu eu %llu su%llu fsu%llu g%llu eg%llu sg%llu fsg%llu\n",
-                     item->creds.uid, item->creds.euid, item->creds.suid, item->creds.fsuid,
-                     item->creds.gid, item->creds.egid, item->creds.sgid, item->creds.fsgid); */
-            break;
-          }
-
         case KDBUS_ITEM_PIDS:
         case KDBUS_ITEM_PID_COMM:
         case KDBUS_ITEM_TID_COMM:
@@ -2312,11 +2697,12 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
         case KDBUS_ITEM_AUXGROUPS:
         case KDBUS_ITEM_OWNED_NAME:
         case KDBUS_ITEM_NAME:
-          //g_print ("unhandled %04x\n", (int) item->type);
+        case KDBUS_ITEM_DST_ID:
+        case KDBUS_ITEM_BLOOM_FILTER:
           break;
 
         default:
-          g_error ("[KDBUS] DBUS_PAYLOAD: Unknown filed - %lld", item->type);
+          g_warning ("[KDBUS] DBUS_PAYLOAD: Unknown filed - %lld", item->type);
           break;
         }
     }
@@ -2339,7 +2725,20 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
   g_variant_unref (parts[0]);
 
   while (g_variant_iter_loop (fields_iter, "{tv}", &key, &value))
-    g_dbus_message_set_header (message, key, value);
+    {
+      switch (key)
+        {
+          case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
+            g_dbus_message_set_reply_serial (message, (guint32) g_variant_get_uint64 (value));
+            continue;
+
+          default:
+            g_dbus_message_set_header (message, key, value);
+            continue;
+        }
+    }
+
+  g_variant_iter_free (fields_iter);
 
   g_dbus_message_set_flags (message, flags);
   g_dbus_message_set_serial (message, serial);
@@ -2354,23 +2753,23 @@ g_kdbus_decode_dbus_msg (GKDBusWorker           *worker,
   g_variant_unref (body);
   g_variant_unref (parts[1]);
 
-  //g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
+  /* set 'sender' field */
+  sender = g_strdup_printf (":1.%"G_GUINT64_FORMAT, (guint64) msg->src_id);
+  if (!g_strcmp0 (worker->unique_name, sender))
+    g_dbus_message_set_sender (message, "org.freedesktop.DBus");
+  else
+    g_dbus_message_set_sender (message, sender);
+  g_free (sender);
 
-  (* worker->message_received_callback) (message, worker->user_data);
-
-  g_object_unref (message);
-
-  return 0;
+  return message;
 }
 
 
-/**
- * _g_kdbus_receive:
- *
+/*
+ * _g_kdbus_receive
  */
-static gssize
-_g_kdbus_receive (GKDBusWorker        *kdbus,
-                  GCancellable  *cancellable,
+static void
+_g_kdbus_receive (GKDBusWorker  *worker,
                   GError       **error)
 {
   struct kdbus_cmd_recv recv;
@@ -2379,54 +2778,52 @@ _g_kdbus_receive (GKDBusWorker        *kdbus,
   memset (&recv, 0, sizeof recv);
   recv.size = sizeof (recv);
 
-  if (g_cancellable_set_error_if_cancelled (cancellable, error))
-    return -1;
-
 again:
-    if (ioctl(kdbus->fd, KDBUS_CMD_RECV, &recv) < 0)
+    if (ioctl(worker->fd, KDBUS_CMD_RECV, &recv) < 0)
       {
         if (errno == EINTR)
           goto again;
 
         if (errno == EAGAIN)
-          return 0;
-
-        g_warning ("in holding pattern over %d %d\n", kdbus->fd, errno);
-        while (1)
-          sleep(1);
+          return;
 
         g_set_error (error, G_IO_ERROR,
                      g_io_error_from_errno (errno),
                      _("Error while receiving message: %s"),
                      g_strerror (errno));
-        return -1;
+        return;
       }
 
-   msg = (struct kdbus_msg *)((guint8 *)kdbus->kdbus_buffer + recv.msg.offset);
+   msg = (struct kdbus_msg *)((guint8 *)worker->kdbus_buffer + recv.msg.offset);
 
    if (msg->payload_type == KDBUS_PAYLOAD_DBUS)
-     g_kdbus_decode_dbus_msg (kdbus, msg);
+     {
+       GDBusMessage *message;
+
+       message = g_kdbus_decode_dbus_msg (worker, msg);
+       (* worker->message_received_callback) (message, worker->user_data);
+
+       g_object_unref (message);
+     }
    else if (msg->payload_type == KDBUS_PAYLOAD_KERNEL)
-     g_kdbus_decode_kernel_msg (kdbus, msg);
+     g_kdbus_decode_kernel_msg (worker, msg);
    else
      {
        g_set_error (error,
                     G_DBUS_ERROR,
                     G_DBUS_ERROR_FAILED,
                     _("Received unknown payload type"));
-       return -1;
      }
 
-  g_kdbus_free_data (kdbus, recv.msg.offset);
-
-  return 0;
+  g_kdbus_close_msg (worker, msg);
+  return;
 }
 
 static gboolean
-g_kdbus_msg_append_item (struct kdbus_msg *msg,
-                         gsize             type,
-                         gconstpointer     data,
-                         gsize             size)
+g_kdbus_msg_append_item (struct kdbus_msg  *msg,
+                         gsize              type,
+                         gconstpointer      data,
+                         gsize              size)
 {
   struct kdbus_item *item;
   gsize item_size;
@@ -2436,7 +2833,6 @@ g_kdbus_msg_append_item (struct kdbus_msg *msg,
   if (msg->size + item_size > KDBUS_MSG_MAX_SIZE)
     return FALSE;
 
-  /* align */
   msg->size += (-msg->size) & 7;
   item = (struct kdbus_item *) ((guchar *) msg + msg->size);
   item->type = type;
@@ -2449,9 +2845,9 @@ g_kdbus_msg_append_item (struct kdbus_msg *msg,
 }
 
 static gboolean
-g_kdbus_msg_append_payload_vec (struct kdbus_msg *msg,
-                                gconstpointer     data,
-                                gsize             size)
+g_kdbus_msg_append_payload_vec (struct kdbus_msg  *msg,
+                                gconstpointer      data,
+                                gsize              size)
 {
   struct kdbus_vec vec = {
     .size = size,
@@ -2462,10 +2858,10 @@ g_kdbus_msg_append_payload_vec (struct kdbus_msg *msg,
 }
 
 static gboolean
-g_kdbus_msg_append_payload_memfd (struct kdbus_msg *msg,
-                                  gint              fd,
-                                  gsize             offset,
-                                  gsize             size)
+g_kdbus_msg_append_payload_memfd (struct kdbus_msg  *msg,
+                                  gint               fd,
+                                  gsize              offset,
+                                  gsize              size)
 {
   struct kdbus_memfd mfd = {
    .start = offset,
@@ -2477,8 +2873,8 @@ g_kdbus_msg_append_payload_memfd (struct kdbus_msg *msg,
 }
 
 static struct kdbus_bloom_filter *
-g_kdbus_msg_append_bloom (struct kdbus_msg *msg,
-                          gsize             size)
+g_kdbus_msg_append_bloom (struct kdbus_msg  *msg,
+                          gsize              size)
 {
   struct kdbus_item *bloom_item;
   gsize bloom_item_size;
@@ -2489,11 +2885,9 @@ g_kdbus_msg_append_bloom (struct kdbus_msg *msg,
   if (msg->size + bloom_item_size > KDBUS_MSG_MAX_SIZE)
     return NULL;
 
-  /* align */
   msg->size += (-msg->size) & 7;
   bloom_item = (struct kdbus_item *) ((guchar *) msg + msg->size);
 
-  /* set size and type */
   bloom_item->size = bloom_item_size;
   bloom_item->type = KDBUS_ITEM_BLOOM_FILTER;
 
@@ -2501,150 +2895,61 @@ g_kdbus_msg_append_bloom (struct kdbus_msg *msg,
   return &bloom_item->bloom_filter;
 }
 
-#if 0
-#include "dbusheader.h"
 
-void dump_header (gconstpointer data, gsize size) ;
-void
-dump_header (gconstpointer data,
-             gsize size)
-{
-  GDBusMessageHeaderFieldsIterator iter;
-  GDBusMessageHeader header;
-
-  header = g_dbus_message_header_new (data, size);
-  g_print ("header e/%c t/%u f/x%x v/%u s/%"G_GUINT64_FORMAT"\n",
-           g_dbus_message_header_get_endian (header),
-           g_dbus_message_header_get_type (header),
-           g_dbus_message_header_get_flags (header),
-           g_dbus_message_header_get_version (header),
-           g_dbus_message_header_get_serial (header));
-
-  iter = g_dbus_message_header_iterate_fields (header);
-
-  while (g_dbus_message_header_fields_iterator_next (&iter))
-    {
-      const gchar *string;
-      guint64 reply_to;
-      guint64 key;
-
-      key = g_dbus_message_header_fields_iterator_get_key (iter);
-
-      switch (key)
-        {
-          case G_DBUS_MESSAGE_HEADER_FIELD_PATH:
-            if (g_dbus_message_header_fields_iterator_get_value_as_object_path (iter, &string))
-              g_print ("  path: %s\n", string);
-            else
-              g_print ("  path: <<invalid string>>\n");
-            break;
-
-          case G_DBUS_MESSAGE_HEADER_FIELD_INTERFACE:
-            if (g_dbus_message_header_fields_iterator_get_value_as_string (iter, &string))
-              g_print ("  interface: %s\n", string);
-            else
-              g_print ("  interface: <<invalid string>>\n");
-            break;
-
-          case G_DBUS_MESSAGE_HEADER_FIELD_MEMBER:
-            if (g_dbus_message_header_fields_iterator_get_value_as_string (iter, &string))
-              g_print ("  member: %s\n", string);
-            else
-              g_print ("  member: <<invalid string>>\n");
-            break;
-
-          case G_DBUS_MESSAGE_HEADER_FIELD_ERROR_NAME:
-            if (g_dbus_message_header_fields_iterator_get_value_as_string (iter, &string))
-              g_print ("  error: %s\n", string);
-            else
-              g_print ("  error: <<invalid string>>\n");
-            break;
-
-          case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
-            if (g_dbus_message_header_fields_iterator_get_value_as_string (iter, &string))
-              g_print ("  serial: %s\n", string);
-            else
-              g_print ("  serial: <<invalid string>>\n");
-            break;
-
-          case G_DBUS_MESSAGE_HEADER_FIELD_DESTINATION:
-            if (g_dbus_message_header_fields_iterator_get_value_as_string (iter, &string))
-              g_print ("  destination: %s\n", string);
-            else
-              g_print ("  destination: <<invalid string>>\n");
-            break;
-
-          case G_DBUS_MESSAGE_HEADER_FIELD_SENDER:
-            if (g_dbus_message_header_fields_iterator_get_value_as_string (iter, &string))
-              g_print ("  sender: %s\n", string);
-            else
-              g_print ("  sender: <<invalid string>>\n");
-            break;
-
-          default:
-            g_print ("unknown field code %"G_GUINT64_FORMAT"\n", key);
-            g_assert_not_reached ();
-        }
-    }
-
-  g_print ("\n");
-
-}
-#endif
-
-/**
- * _g_kdbus_send:
- * Returns: size of data sent or -1 when error
+/*
+ * _g_kdbus_send
  */
 static gboolean
-_g_kdbus_send (GKDBusWorker        *kdbus,
+_g_kdbus_send (GKDBusWorker  *worker,
                GDBusMessage  *message,
+               GDBusMessage **out_reply,
+               gint           timeout_msec,
                GError       **error)
 {
-  struct kdbus_msg *msg = alloca (KDBUS_MSG_MAX_SIZE);
+  struct kdbus_msg *msg;
   GVariantVectors body_vectors;
   struct kdbus_cmd_send send;
   const gchar *dst_name;
+  gboolean result;
 
-  g_return_val_if_fail (G_IS_KDBUS_WORKER (kdbus), -1);
+  g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), FALSE);
+
+  msg = alloca (KDBUS_MSG_MAX_SIZE);
+  result = TRUE;
 
   /* fill in as we go... */
   memset (msg, 0, sizeof (struct kdbus_msg));
   msg->size = sizeof (struct kdbus_msg);
   msg->payload_type = KDBUS_PAYLOAD_DBUS;
-  msg->src_id = kdbus->unique_id;
+  msg->src_id = worker->unique_id;
   msg->cookie = g_dbus_message_get_serial(message);
 
   /* Message destination */
-  {
-    dst_name = g_dbus_message_get_destination (message);
+  dst_name = g_dbus_message_get_destination (message);
+  if (dst_name != NULL)
+    {
+      if (g_dbus_is_unique_name (dst_name))
+        {
+          if (dst_name[1] != '1' || dst_name[2] != '.')
+            {
+              g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_NAME_HAS_NO_OWNER,
+                           "Invalid unique D-Bus name '%s'", dst_name);
+              return FALSE;
+            }
 
-    if (dst_name != NULL)
-      {
-        if (g_dbus_is_unique_name (dst_name))
-          {
-            if (dst_name[1] != '1' || dst_name[2] != '.')
-              {
-                g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_NAME_HAS_NO_OWNER,
-                             "Invalid unique D-Bus name '%s'", dst_name);
-                return FALSE;
-              }
-
-            /* We already know that it passes the checks for unique
-             * names, so no need to perform error checking on strtoull.
-             */
-            msg->dst_id = strtoull (dst_name + 3, NULL, 10);
-            dst_name = NULL;
-          }
-        else
-          {
-            g_kdbus_msg_append_item (msg, KDBUS_ITEM_DST_NAME, dst_name, strlen (dst_name) + 1);
-            msg->dst_id = KDBUS_DST_ID_NAME;
-          }
-      }
-    else
-      msg->dst_id = KDBUS_DST_ID_BROADCAST;
-  }
+          /* We already know that it passes the checks for unique
+           * names, so no need to perform error checking on strtoull.
+           */
+          msg->dst_id = strtoull (dst_name + 3, NULL, 10);
+        }
+      else
+        {
+          g_kdbus_msg_append_item (msg, KDBUS_ITEM_DST_NAME, dst_name, strlen (dst_name) + 1);
+          msg->dst_id = KDBUS_DST_ID_NAME;
+        }
+    }
+  else
+    msg->dst_id = KDBUS_DST_ID_BROADCAST;
 
   /* File descriptors */
   {
@@ -2687,7 +2992,7 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
     /* We set the sender field to the correct value for ourselves */
     g_variant_builder_add (&builder, "{tv}",
                            (guint64) G_DBUS_MESSAGE_HEADER_FIELD_SENDER,
-                           g_variant_new_printf (":1.%"G_GUINT64_FORMAT, kdbus->unique_id));
+                           g_variant_new_printf (":1.%"G_GUINT64_FORMAT, worker->unique_id));
 
     while (g_hash_table_iter_next (&header_iter, &key, &value))
       {
@@ -2698,11 +3003,14 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
             /* These are the normal header fields that get passed
              * straight through.
              */
+            case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
+              g_variant_builder_add (&builder, "{tv}", key_int, g_variant_new_uint64 (g_dbus_message_get_reply_serial(message)));
+              continue;
+
             case G_DBUS_MESSAGE_HEADER_FIELD_PATH:
             case G_DBUS_MESSAGE_HEADER_FIELD_INTERFACE:
             case G_DBUS_MESSAGE_HEADER_FIELD_MEMBER:
             case G_DBUS_MESSAGE_HEADER_FIELD_ERROR_NAME:
-            case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
             case G_DBUS_MESSAGE_HEADER_FIELD_DESTINATION:
               g_variant_builder_add (&builder, "{tv}", key_int, value);
               /* This is a little bit gross.
@@ -2802,34 +3110,55 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
                 ((g_dbus_message_get_flags (message) & G_DBUS_MESSAGE_FLAGS_NO_AUTO_START) ? KDBUS_MSG_NO_AUTO_START : 0);
 
   if ((msg->flags) & KDBUS_MSG_EXPECT_REPLY)
-    msg->timeout_ns = 1000LU * g_get_monotonic_time() + KDBUS_TIMEOUT_NS;
+    msg->timeout_ns = 1000LU * g_get_monotonic_time() + KDBUS_DEFAULT_TIMEOUT_NS;
   else
     msg->cookie_reply = g_dbus_message_get_reply_serial(message);
-
-  if (g_dbus_message_get_message_type (message) == G_DBUS_MESSAGE_TYPE_SIGNAL)
-    msg->flags |= KDBUS_MSG_SIGNAL;
 
   /*
    * append bloom filter item for broadcast signals
    */
-  if (msg->dst_id == KDBUS_DST_ID_BROADCAST)
+  if (g_dbus_message_get_message_type (message) == G_DBUS_MESSAGE_TYPE_SIGNAL)
     {
       struct kdbus_bloom_filter *bloom_filter;
 
-      bloom_filter = g_kdbus_msg_append_bloom (msg, kdbus->bloom_size);
+      msg->flags |= KDBUS_MSG_SIGNAL;
+      bloom_filter = g_kdbus_msg_append_bloom (msg, worker->bloom_size);
       if (bloom_filter == NULL)
         goto need_compact;
-      g_kdbus_setup_bloom (kdbus, message, bloom_filter);
+      g_kdbus_setup_bloom (worker, message, bloom_filter);
     }
 
   send.size = sizeof (send);
-  send.flags = 0;
   send.msg_address = (gsize) msg;
+
+  if (out_reply != NULL)
+    send.flags = KDBUS_SEND_SYNC_REPLY;
+  else
+    send.flags = 0;
+
+  /*
+   * show debug
+   */
+  if (g_strcmp0 (worker->unique_name, dst_name))
+    {
+      if (G_UNLIKELY (_g_dbus_debug_message ()))
+        {
+          gchar *s;
+          _g_dbus_debug_print_lock ();
+          g_print ("========================================================================\n"
+                   "GDBus-debug:Message:\n"
+                   "  >>>> SENT D-Bus/kdbus message\n");
+          s = g_dbus_message_print (message, 2);
+          g_print ("%s", s);
+          g_free (s);
+          _g_dbus_debug_print_unlock ();
+        }
+    }
 
   /*
    * send message
    */
-  if (ioctl(kdbus->fd, KDBUS_CMD_SEND, &send))
+  if (ioctl(worker->fd, KDBUS_CMD_SEND, &send))
     {
       if (errno == ENXIO || errno == ESRCH)
         {
@@ -2851,31 +3180,130 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
           g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
                        "Too many pending messages on the receiver side");
         }
+      else if (errno == EMSGSIZE)
+        {
+          g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+                       "The size of the message is excessive");
+        }
       else
         {
-          g_error ("WTF? %d\n", errno);
+          g_warning ("Error: %s\n", strerror(errno));
           g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                        "%s", strerror(errno));
         }
-      return FALSE;
+      result = FALSE;
+    }
+  else if (out_reply != NULL)
+    {
+      struct kdbus_msg *kmsg;
+
+      kmsg = (struct kdbus_msg *)((guint8 *)worker->kdbus_buffer + send.reply.offset);
+
+      *out_reply = g_kdbus_decode_dbus_msg (worker, kmsg);
+      g_kdbus_close_msg (worker, kmsg);
+
+      if (G_UNLIKELY (_g_dbus_debug_message ()))
+        {
+          gchar *s;
+          _g_dbus_debug_print_lock ();
+          g_print ("========================================================================\n"
+                   "GDBus-debug:Message:\n"
+                   "  <<<< RECEIVED D-Bus message\n");
+          s = g_dbus_message_print (*out_reply, 2);
+          g_print ("%s", s);
+          g_free (s);
+          _g_dbus_debug_print_unlock ();
+        }
     }
 
-  return TRUE;
+  GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
+
+  return result;
 
 need_compact:
   /* We end up here if:
    *  - too many kdbus_items
    *  - too large kdbus_msg size
    *  - too much vector data
-   *
-   * We need to compact the message before sending it.
    */
-  g_assert_not_reached ();
+  g_warning ("Message serialisation error");
+  g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+               "message serialisation error");
+
+  GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
+  return FALSE;
+}
+
+/* ---------------------------------------------------------------------------------------------------- */
+
+static void
+g_kdbus_worker_finalize (GObject *object)
+{
+  GKDBusWorker *worker;
+  GList *match;
+
+  worker = G_KDBUS_WORKER (object);
+
+  if (worker->kdbus_buffer != NULL)
+    munmap (worker->kdbus_buffer, KDBUS_POOL_SIZE);
+  worker->kdbus_buffer = NULL;
+
+  if (worker->unique_name != NULL)
+    g_free (worker->unique_name);
+  worker->unique_name = NULL;
+
+  for (match = worker->matches; match != NULL; match = match->next)
+    match_free (match->data);
+  g_list_free (worker->matches);
+
+  if (worker->fd != -1 && !worker->closed)
+    _g_kdbus_close (worker);
+
+  G_OBJECT_CLASS (g_kdbus_worker_parent_class)->finalize (object);
+}
+
+static void
+g_kdbus_worker_class_init (GKDBusWorkerClass *class)
+{
+  class->finalize = g_kdbus_worker_finalize;
+}
+
+static void
+g_kdbus_worker_init (GKDBusWorker *worker)
+{
+  worker->fd = -1;
+
+  worker->context = NULL;
+  worker->loop = NULL;
+  worker->thread = NULL;
+  worker->source = 0;
+
+  worker->kdbus_buffer = NULL;
+  worker->unique_name = NULL;
+  worker->unique_id = -1;
+
+  worker->flags = KDBUS_HELLO_ACCEPT_FD;
+  worker->attach_flags_send = _KDBUS_ATTACH_ALL;
+  worker->attach_flags_recv = _KDBUS_ATTACH_ALL;
+
+  worker->bloom_size = 0;
+  worker->bloom_n_hash = 0;
+  worker->matches = NULL;
+}
+
+static gpointer
+_g_kdbus_worker_thread (gpointer _data)
+{
+  GKDBusWorker *worker = (GKDBusWorker *)_data;
+
+  g_main_loop_run (worker->loop);
+
+  return NULL;
 }
 
 GKDBusWorker *
-g_kdbus_worker_new (const gchar  *address,
-                    GError      **error)
+_g_kdbus_worker_new (const gchar  *address,
+                     GError      **error)
 {
   GKDBusWorker *worker;
 
@@ -2886,16 +3314,20 @@ g_kdbus_worker_new (const gchar  *address,
       return NULL;
     }
 
+  worker->context = g_main_context_new ();
+  worker->loop = g_main_loop_new (worker->context, FALSE);
+  worker->thread = g_thread_new ("gkdbus", _g_kdbus_worker_thread, worker);
+
   return worker;
 }
 
 void
-g_kdbus_worker_associate (GKDBusWorker                            *worker,
-                          GDBusCapabilityFlags                     capabilities,
-                          GDBusWorkerMessageReceivedCallback       message_received_callback,
-                          GDBusWorkerMessageAboutToBeSentCallback  message_about_to_be_sent_callback,
-                          GDBusWorkerDisconnectedCallback          disconnected_callback,
-                          gpointer                                 user_data)
+_g_kdbus_worker_associate (GKDBusWorker                            *worker,
+                           GDBusCapabilityFlags                     capabilities,
+                           GDBusWorkerMessageReceivedCallback       message_received_callback,
+                           GDBusWorkerMessageAboutToBeSentCallback  message_about_to_be_sent_callback,
+                           GDBusWorkerDisconnectedCallback          disconnected_callback,
+                           gpointer                                 user_data)
 {
   worker->capabilities = capabilities;
   worker->message_received_callback = message_received_callback;
@@ -2904,18 +3336,59 @@ g_kdbus_worker_associate (GKDBusWorker                            *worker,
   worker->user_data = user_data;
 }
 
+static gboolean
+g_kdbus_ready (gint           fd,
+               GIOCondition   condition,
+               gpointer       user_data)
+{
+  GKDBusWorker *worker;
+  GError *error;
+
+  worker = user_data;
+  error = NULL;
+
+  _g_kdbus_receive (worker, &error);
+  g_assert_no_error (error);
+
+  return G_SOURCE_CONTINUE;
+}
+
+typedef struct
+{
+  GKDBusWorker  *worker;
+  GDBusMessage  *message;
+} SyntheticReplyData;
+
+static gboolean
+deliver_synthetic_reply (gpointer user_data)
+{
+  SyntheticReplyData *data;
+  GKDBusWorker *worker;
+  GDBusMessage *message;
+
+  data = user_data;
+  worker = data->worker;
+  message = data->message;
+
+  (* worker->message_received_callback) (message, worker->user_data);
+
+  g_object_unref (message);
+  g_free (data);
+
+  return FALSE;
+}
+
 void
-g_kdbus_worker_unfreeze (GKDBusWorker *worker)
+_g_kdbus_worker_unfreeze (GKDBusWorker *worker)
 {
   gchar *name;
 
   if (worker->source != NULL)
     return;
 
-  worker->context = g_main_context_ref_thread_default ();
   worker->source = g_unix_fd_source_new (worker->fd, G_IO_IN);
 
-  g_source_set_callback (worker->source, (GSourceFunc) kdbus_ready, worker, NULL);
+  g_source_set_callback (worker->source, (GSourceFunc) g_kdbus_ready, worker, NULL);
   name = g_strdup_printf ("kdbus worker");
   g_source_set_name (worker->source, name);
   g_free (name);
@@ -2924,29 +3397,65 @@ g_kdbus_worker_unfreeze (GKDBusWorker *worker)
 }
 
 gboolean
-g_kdbus_worker_send_message (GKDBusWorker  *worker,
-                             GDBusMessage  *message,
-                             GError       **error)
+_g_kdbus_worker_send_message (GKDBusWorker  *worker,
+                              GDBusMessage  *message,
+                              gint           timeout_msec,
+                              GError       **error)
 {
-  return _g_kdbus_send (worker, message, error);
+#ifdef DBUS_DAEMON_EMULATION
+  if (_is_message_to_dbus_daemon (message))
+    {
+      SyntheticReplyData *data;
+
+      data = g_new0 (SyntheticReplyData, 1);
+
+      data->worker = worker;
+      data->message = _dbus_daemon_synthetic_reply (worker, message);
+
+      g_main_context_invoke (worker->context, deliver_synthetic_reply, data);
+
+      return TRUE;
+    }
+#endif /* DBUS_DAEMON_EMULATION */
+
+  return _g_kdbus_send (worker, message, NULL, timeout_msec, error);
 }
 
-/* TODO */
-void
-g_kdbus_worker_flush_sync (GKDBusWorker *worker)
+gboolean
+_g_kdbus_worker_send_message_sync (GKDBusWorker  *worker,
+                                   GDBusMessage  *message,
+                                   GDBusMessage **out_reply,
+                                   gint           timeout_msec,
+                                   GError       **error)
 {
-  g_warning ("TODO: Implement sync flush");
+#ifdef DBUS_DAEMON_EMULATION
+  if (_is_message_to_dbus_daemon (message))
+    {
+      *out_reply = _dbus_daemon_synthetic_reply (worker, message);
+      return TRUE;
+    }
+#endif /* DBUS_DAEMON_EMULATION */
+
+  return _g_kdbus_send (worker, message, out_reply, timeout_msec, error);
+}
+
+gboolean
+_g_kdbus_worker_flush_sync (GKDBusWorker *worker)
+{
+  return TRUE;
 }
 
 void
-g_kdbus_worker_stop (GKDBusWorker *worker)
+_g_kdbus_worker_stop (GKDBusWorker *worker)
 {
-  g_warning ("TODO: Implement worker stop");
+  g_object_unref (worker);
 }
 
 void
-g_kdbus_worker_close (GKDBusWorker       *worker,
-                      GCancellable       *cancellable,
-                      GSimpleAsyncResult *result)
+_g_kdbus_worker_close (GKDBusWorker       *worker,
+                       GCancellable       *cancellable,
+                       GSimpleAsyncResult *result)
 {
+  worker->disconnected_callback (FALSE, NULL, worker->user_data);
+  g_simple_async_result_complete_in_idle (result);
 }
