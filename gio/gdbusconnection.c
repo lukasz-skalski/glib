@@ -2851,6 +2851,7 @@ on_worker_message_received (GDBusMessage *message,
   G_UNLOCK (message_bus_lock);
 
   //g_debug ("in on_worker_message_received");
+  g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
 
   g_object_ref (message);
   g_dbus_message_lock (message);
@@ -4141,14 +4142,14 @@ g_dbus_connection_signal_subscribe (GDBusConnection     *connection,
                g_strcmp0 (signal_data->member, "NameOwnerChanged") == 0))
             {
               if (g_strcmp0 (signal_data->member, "NameAcquired") == 0)
-                _g_kdbus_subscribe_name_acquired (connection->kdbus_worker, arg0, (guint64) subscriber.id);
+                _g_kdbus_subscribe_name_acquired (connection->kdbus_worker, signal_data->rule, arg0, NULL);
               else if (g_strcmp0 (signal_data->member, "NameLost") == 0)
-                _g_kdbus_subscribe_name_lost (connection->kdbus_worker, arg0, (guint64) subscriber.id);
+                _g_kdbus_subscribe_name_lost (connection->kdbus_worker, signal_data->rule, arg0, NULL);
               else if (g_strcmp0 (signal_data->member, "NameOwnerChanged") == 0)
-                _g_kdbus_subscribe_name_owner_changed (connection->kdbus_worker, arg0, (guint64) subscriber.id);
+                _g_kdbus_subscribe_name_owner_changed (connection->kdbus_worker, signal_data->rule, arg0, NULL);
             }
           else
-            _g_kdbus_AddMatch (connection->kdbus_worker, signal_data->rule, subscriber.id);
+            _g_kdbus_AddMatch (connection->kdbus_worker, signal_data->rule, NULL);
         }
       else
         {
@@ -4239,7 +4240,7 @@ unsubscribe_id_internal (GDBusConnection *connection,
                * did, and releasing the lock later.
                */
               if (connection->kdbus_worker)
-                _g_kdbus_RemoveMatch (connection->kdbus_worker, subscription_id);
+                _g_kdbus_RemoveMatch (connection->kdbus_worker, signal_data->rule, NULL);
               else
                 if (!is_signal_data_for_name_lost_or_acquired (signal_data))
                   remove_match_rule (connection, signal_data->rule);

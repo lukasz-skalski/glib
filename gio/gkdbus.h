@@ -103,6 +103,10 @@ GVariant *                              _g_kdbus_GetListQueuedOwners        (GKD
                                                                              const gchar      *name,
                                                                              GError          **error);
 
+GVariant *                              _g_kdbus_NameHasOwner               (GKDBusWorker     *connection,
+                                                                             const gchar      *name,
+                                                                             GError          **error);
+
 GVariant *                              _g_kdbus_GetNameOwner               (GKDBusWorker  *worker,
                                                                              const gchar      *name,
                                                                              GError          **error);
@@ -115,30 +119,46 @@ GVariant *                              _g_kdbus_GetConnectionUnixUser      (GKD
                                                                              const gchar      *name,
                                                                              GError          **error);
 
+GVariant *                              _g_kdbus_GetConnectionSELinuxSecurityContext   (GKDBusWorker  *worker,
+                                                                                        const gchar   *name,
+                                                                                        GError       **error);
+
 GVariant *                              _g_kdbus_StartServiceByName         (GKDBusWorker     *worker,
                                                                              GDBusConnection  *connection,
                                                                              const gchar      *name,
                                                                              guint32           flags,
                                                                              GError          **error);
 
-void                                    _g_kdbus_AddMatch                   (GKDBusWorker     *worker,
+gboolean                                _g_kdbus_AddMatch                   (GKDBusWorker     *worker,
                                                                              const gchar      *match_rule,
-                                                                             guint64           cookie);
+                                                                             GError          **error);
 
-void                                    _g_kdbus_RemoveMatch                (GKDBusWorker     *worker,
-                                                                             guint64           cookie);
+gboolean                                _g_kdbus_RemoveMatch                (GKDBusWorker     *worker,
+                                                                             const gchar      *match_rule,
+                                                                             GError          **error);
 
-void                                    _g_kdbus_subscribe_name_acquired    (GKDBusWorker  *worker,
+GVariant *                              _g_kdbus_AddMatch_tmp               (GKDBusWorker     *worker,
+                                                                             const gchar      *match_rule,
+                                                                             GError          **error);
+
+GVariant *                              _g_kdbus_RemoveMatch_tmp            (GKDBusWorker     *worker,
+                                                                             const gchar      *match_rule,
+                                                                             GError          **error);
+
+gboolean                                _g_kdbus_subscribe_name_acquired    (GKDBusWorker  *worker,
+                                                                             const gchar   *match_rule,
                                                                              const gchar   *name,
-                                                                             guint64        cookie);
+                                                                             GError          **error);
 
-void                                    _g_kdbus_subscribe_name_lost        (GKDBusWorker  *worker,
+gboolean                                _g_kdbus_subscribe_name_lost        (GKDBusWorker  *worker,
+                                                                             const gchar   *match_rule,
                                                                              const gchar   *name,
-                                                                             guint64        cookie);
+                                                                             GError          **error);
 
-void                                    _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
+gboolean                                _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
+                                                                               const gchar   *match_rule,
                                                                                const gchar   *name,
-                                                                               guint64        cookie);
+                                                                               GError          **error);
 G_END_DECLS
 
 #endif /* __G_KDBUS_H__ */
