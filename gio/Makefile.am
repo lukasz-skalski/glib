@@ -84,6 +84,7 @@ gdbus_sources = 							\
 	gdbusobjectmanager.h		gdbusobjectmanager.c		\
 	gdbusobjectmanagerclient.h	gdbusobjectmanagerclient.c	\
 	gdbusobjectmanagerserver.h	gdbusobjectmanagerserver.c	\
+	gkdbus.h			gkdbus.c			\
 	gtestdbus.h			gtestdbus.c			\
 	$(NULL)
 
@@ -402,8 +403,6 @@ libgio_2_0_la_SOURCES =		\
 	gioprivate.h		\
 	giowin32-priv.h 	\
 	gloadableicon.c 	\
-	gkdbus.c                \
-	gkdbuscompatibility.c   \
 	gmount.c 		\
 	gmemoryinputstream.c 	\
 	gmemoryoutputstream.c 	\
@@ -582,8 +581,6 @@ gio_headers =			\
 	giomodule.h 		\
 	gioscheduler.h 		\
 	giostream.h		\
-	gkdbus.h                \
-	gkdbuscompatibility.h   \
 	gloadableicon.h 	\
 	gmount.h 		\
 	gmemoryinputstream.h 	\
