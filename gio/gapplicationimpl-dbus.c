@@ -424,7 +424,7 @@ g_application_impl_attempt_primary (GApplicationImpl  *impl,
    * in the case that we can't do that.
    */
   /* DBUS_NAME_FLAG_DO_NOT_QUEUE: 0x4 */
-  rval = g_dbus_request_name (impl->session_bus, impl->bus_name, G_BUS_NAME_OWNER_FLAGS_DO_NOT_QUEUE, error);
+  rval = _g_dbus_request_name (impl->session_bus, impl->bus_name, G_BUS_NAME_OWNER_FLAGS_DO_NOT_QUEUE, error);
 
   if (rval == G_BUS_REQUEST_NAME_FLAGS_ERROR)
     return FALSE;
@@ -472,7 +472,7 @@ g_application_impl_stop_primary (GApplicationImpl *impl)
 
   if (impl->primary && impl->bus_name)
     {
-      g_dbus_release_name (impl->session_bus, impl->bus_name, NULL);
+      _g_dbus_release_name (impl->session_bus, impl->bus_name, NULL);
       impl->primary = FALSE;
     }
 }

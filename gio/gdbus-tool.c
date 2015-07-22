@@ -276,7 +276,7 @@ print_names (GDBusConnection *c,
 
   error = NULL;
   cnt = 0;
-  list_names = g_dbus_get_list_names (c, &error);
+  list_names = _g_dbus_get_list_names (c, &error);
   if (list_names == NULL)
     {
       g_printerr (_("Error: %s\n"), error->message);
@@ -290,7 +290,7 @@ print_names (GDBusConnection *c,
 
   error = NULL;
   cnt = 0;
-  list_names = g_dbus_get_list_activatable_names (c, &error);
+  list_names = _g_dbus_get_list_activatable_names (c, &error);
   if (list_names == NULL)
     {
       g_printerr (_("Error: %s\n"), error->message);

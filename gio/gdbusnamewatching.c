@@ -373,9 +373,9 @@ invoke_get_name_owner (Client *client)
     {
       char *name_owner;
 
-      name_owner = g_dbus_get_name_owner (client->connection,
-                                          client->name,
-                                          NULL);
+      name_owner = _g_dbus_get_name_owner (client->connection,
+                                           client->name,
+                                           NULL);
       process_get_name_owner (client, name_owner);
       g_free (name_owner);
     }
@@ -484,7 +484,7 @@ has_connection (Client *client)
         {
           guint32 result;
 
-          result = g_dbus_start_service_by_name (client->connection, client->name, 0, NULL);
+          result = _g_dbus_start_service_by_name (client->connection, client->name, 0, NULL);
           process_start_service_by_name (client, result);
         }
       else

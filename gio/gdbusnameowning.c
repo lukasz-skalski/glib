@@ -413,7 +413,7 @@ has_connection (Client *client)
                                                              G_CALLBACK (on_connection_disconnected),
                                                              client);
   /* attempt to acquire the name */
-  request_name_reply = g_dbus_request_name (client->connection, client->name, client->flags, &error);
+  request_name_reply = _g_dbus_request_name (client->connection, client->name, client->flags, &error);
   g_assert_no_error (error);
 
   process_request_name_reply (client, request_name_reply);
@@ -885,7 +885,7 @@ g_bus_unown_name (guint owner_id)
            * I believe this is a bug in the bus daemon.
            */
 
-          release_name_reply = g_dbus_release_name (client->connection, client->name, &error);
+          release_name_reply = _g_dbus_release_name (client->connection, client->name, &error);
           if (release_name_reply == G_BUS_RELEASE_NAME_FLAGS_ERROR)
             {
               g_warning ("Error releasing name %s: %s", client->name, error->message);

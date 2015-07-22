@@ -1640,10 +1640,10 @@ g_dbus_connection_close_sync (GDBusConnection  *connection,
  * Since: 2.4x
  */
 GBusRequestNameReplyFlags
-g_dbus_request_name (GDBusConnection     *connection,
-                     const gchar         *name,
-                     GBusNameOwnerFlags   flags,
-                     GError             **error)
+_g_dbus_request_name (GDBusConnection     *connection,
+                      const gchar         *name,
+                      GBusNameOwnerFlags   flags,
+                      GError             **error)
 {
   GVariant *result;
   guint32 request_name_reply;
@@ -1687,9 +1687,9 @@ g_dbus_request_name (GDBusConnection     *connection,
  * Since: 2.4x
  */
 GBusReleaseNameReplyFlags
-g_dbus_release_name (GDBusConnection     *connection,
-                     const gchar         *name,
-                     GError             **error)
+_g_dbus_release_name (GDBusConnection  *connection,
+                      const gchar      *name,
+                      GError          **error)
 {
   GVariant *result;
   guint32 release_name_reply;
@@ -1732,8 +1732,8 @@ g_dbus_release_name (GDBusConnection     *connection,
  * Since: 2.4x
  */
 gchar *
-g_dbus_get_bus_id (GDBusConnection  *connection,
-                   GError          **error)
+_g_dbus_get_bus_id (GDBusConnection  *connection,
+                    GError          **error)
 {
   GVariant *result;
   gchar *bus_id;
@@ -1851,8 +1851,8 @@ _g_dbus_get_list_internal (GDBusConnection    *connection,
  * Since: 2.4x
  */
 gchar **
-g_dbus_get_list_names (GDBusConnection  *connection,
-                       GError          **error)
+_g_dbus_get_list_names (GDBusConnection  *connection,
+                        GError          **error)
 {
   gchar **strv;
 
@@ -1879,8 +1879,8 @@ g_dbus_get_list_names (GDBusConnection  *connection,
  * Since: 2.4x
  */
 gchar **
-g_dbus_get_list_activatable_names (GDBusConnection  *connection,
-                                   GError          **error)
+_g_dbus_get_list_activatable_names (GDBusConnection  *connection,
+                                    GError          **error)
 {
   gchar **strv;
 
@@ -1912,9 +1912,9 @@ g_dbus_get_list_activatable_names (GDBusConnection  *connection,
  * Since: 2.4x
  */
 gchar **
-g_dbus_get_list_queued_owners (GDBusConnection  *connection,
-                               const gchar      *name,
-                               GError          **error)
+_g_dbus_get_list_queued_owners (GDBusConnection  *connection,
+                                const gchar      *name,
+                                GError          **error)
 {
   gchar **strv;
 
@@ -1949,9 +1949,9 @@ g_dbus_get_list_queued_owners (GDBusConnection  *connection,
  * Since: 2.4x
  */
 gchar *
-g_dbus_get_name_owner (GDBusConnection  *connection,
-                       const gchar      *name,
-                       GError          **error)
+_g_dbus_get_name_owner (GDBusConnection  *connection,
+                        const gchar      *name,
+                        GError          **error)
 {
   GVariant *result;
   gchar *name_owner;
@@ -2002,9 +2002,9 @@ g_dbus_get_name_owner (GDBusConnection  *connection,
  * Since: 2.4x
  */
 guint32
-g_dbus_get_connection_pid (GDBusConnection  *connection,
-                           const gchar      *name,
-                           GError          **error)
+_g_dbus_get_connection_pid (GDBusConnection  *connection,
+                            const gchar      *name,
+                            GError          **error)
 {
   GVariant *result;
   guint32 pid;
@@ -2053,9 +2053,9 @@ g_dbus_get_connection_pid (GDBusConnection  *connection,
  * Since: 2.4x
  */
 guint32
-g_dbus_get_connection_uid (GDBusConnection  *connection,
-                           const gchar      *name,
-                           GError          **error)
+_g_dbus_get_connection_uid (GDBusConnection  *connection,
+                            const gchar      *name,
+                            GError          **error)
 {
   GVariant *result;
   guint32 uid;
@@ -2089,10 +2089,10 @@ g_dbus_get_connection_uid (GDBusConnection  *connection,
  * Since: 2.4x
  */
 GBusStartServiceReplyFlags
-g_dbus_start_service_by_name (GDBusConnection  *connection,
-                              const gchar      *name,
-                              guint32           flags,
-                              GError          **error)
+_g_dbus_start_service_by_name (GDBusConnection  *connection,
+                               const gchar      *name,
+                               guint32           flags,
+                               GError          **error)
 {
   GVariant *result;
   guint32 ret;
@@ -2153,7 +2153,7 @@ g_dbus_connection_get_last_serial (GDBusConnection *connection)
 }
 
 /* ---------------------------------------------------------------------------------------------------- */
-#include "gkdbus.h"
+
 /* Can be called by any thread, with the connection lock held */
 static gboolean
 g_dbus_connection_send_message_unlocked (GDBusConnection   *connection,
