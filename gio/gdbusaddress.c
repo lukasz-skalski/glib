@@ -569,7 +569,7 @@ g_dbus_address_connect (const gchar   *address_entry,
         }
       else
         {
-          worker = g_kdbus_worker_new (path, error);
+          worker = _g_kdbus_worker_new (path, error);
 
           if (worker == NULL)
             return NULL;
@@ -1559,7 +1559,7 @@ g_dbus_address_get_for_bus_sync (GBusType       bus_type,
       ret = g_strdup (g_getenv ("DBUS_SYSTEM_BUS_ADDRESS"));
       if (ret == NULL)
         {
-           ret = g_strdup ("kernel:path=/sys/fs/kdbus/0-system/bus;unix:path=/var/run/dbus/system_bus_socket");
+          ret = g_strdup ("kernel:path=/sys/fs/kdbus/0-system/bus;unix:path=/var/run/dbus/system_bus_socket");
         }
       break;
 

@@ -579,6 +579,11 @@ g_kdbus_worker_finalize (GObject *object)
   if (kdbus->fd != -1 && !kdbus->closed)
     _g_kdbus_close (kdbus);
 
+  // TODO
+  //  for (l = client->matches; l != NULL; l = l->next)
+  //    match_free (l->data);
+  //  g_list_free (client->matches);
+
   G_OBJECT_CLASS (g_kdbus_worker_parent_class)->finalize (object);
 }
 
@@ -1576,36 +1581,42 @@ g_kdbus_bloom_add_prefixes (GKDBusWorker  *worker,
     }
 }
 
-GVariant *
-_g_kdbus_AddMatch_tmp (GKDBusWorker  *worker,
-                       const gchar   *match_rule,
-                       GError       **error)
-{
-  if (_g_kdbus_AddMatch (worker, match_rule, error))
-    return g_variant_new ("()", NULL);
-  else
-    return NULL;
-}
-
-GVariant *
-_g_kdbus_RemoveMatch_tmp (GKDBusWorker  *worker,
-                          const gchar   *match_rule,
-                          GError       **error)
-{
-  if (_g_kdbus_RemoveMatch (worker, match_rule, error))
-    return g_variant_new ("()", NULL);
-  else
-    return NULL;
-}
 
 /**
  * _g_kdbus_AddMatch:
  *
  */
-gboolean
+GVariant *
 _g_kdbus_AddMatch (GKDBusWorker  *worker,
                    const gchar   *match_rule,
                    GError       **error)
+{
+  if (_g_kdbus_AddMatch_internal (worker, match_rule, error))
+    return g_variant_new ("()", NULL);
+  else
+    return NULL;
+}
+
+
+/**
+ * _g_kdbus_RemoveMatch:
+ *
+ */
+GVariant *
+_g_kdbus_RemoveMatch (GKDBusWorker  *worker,
+                      const gchar   *match_rule,
+                      GError       **error)
+{
+  if (_g_kdbus_RemoveMatch_internal (worker, match_rule, error))
+    return g_variant_new ("()", NULL);
+  else
+    return NULL;
+}
+
+gboolean
+_g_kdbus_AddMatch_internal (GKDBusWorker  *worker,
+                            const gchar   *match_rule,
+                            GError       **error)
 {
   Match *match;
   MatchElement *element;
@@ -1628,7 +1639,6 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
     }
 
   match = match_new (match_rule);
-  g_print ("MATCH: %s\n", match_rule);
   if (!match)
     {
       g_set_error (error,
@@ -1757,15 +1767,10 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
   return TRUE;
 }
 
-
-/**
- * _g_kdbus_RemoveMatch:
- *
- */
 gboolean
-_g_kdbus_RemoveMatch (GKDBusWorker  *worker,
-                      const gchar   *match_rule,
-                      GError       **error)
+_g_kdbus_RemoveMatch_internal (GKDBusWorker  *worker,
+                               const gchar   *match_rule,
+                               GError       **error)
 {
   Match *match, *other_match;
   GList *matches;
@@ -1820,7 +1825,6 @@ _g_kdbus_RemoveMatch (GKDBusWorker  *worker,
       };
       gint ret;
 
-      g_print ("Remove Match: %s with cookie: %d\n", match_rule, (int)cookie);
       ret = ioctl(worker->fd, KDBUS_CMD_MATCH_REMOVE, &cmd);
       if (ret < 0)
         {
@@ -3169,8 +3173,8 @@ need_compact:
 }
 
 GKDBusWorker *
-g_kdbus_worker_new (const gchar  *address,
-                    GError      **error)
+_g_kdbus_worker_new (const gchar  *address,
+                     GError      **error)
 {
   GKDBusWorker *worker;
 
@@ -3185,12 +3189,12 @@ g_kdbus_worker_new (const gchar  *address,
 }
 
 void
-g_kdbus_worker_associate (GKDBusWorker                            *worker,
-                          GDBusCapabilityFlags                     capabilities,
-                          GDBusWorkerMessageReceivedCallback       message_received_callback,
-                          GDBusWorkerMessageAboutToBeSentCallback  message_about_to_be_sent_callback,
-                          GDBusWorkerDisconnectedCallback          disconnected_callback,
-                          gpointer                                 user_data)
+_g_kdbus_worker_associate (GKDBusWorker                            *worker,
+                           GDBusCapabilityFlags                     capabilities,
+                           GDBusWorkerMessageReceivedCallback       message_received_callback,
+                           GDBusWorkerMessageAboutToBeSentCallback  message_about_to_be_sent_callback,
+                           GDBusWorkerDisconnectedCallback          disconnected_callback,
+                           gpointer                                 user_data)
 {
   worker->capabilities = capabilities;
   worker->message_received_callback = message_received_callback;
@@ -3200,7 +3204,7 @@ g_kdbus_worker_associate (GKDBusWorker                            *worker,
 }
 
 void
-g_kdbus_worker_unfreeze (GKDBusWorker *worker)
+_g_kdbus_worker_unfreeze (GKDBusWorker *worker)
 {
   gchar *name;
 
@@ -3219,35 +3223,51 @@ g_kdbus_worker_unfreeze (GKDBusWorker *worker)
 }
 
 gboolean
-g_kdbus_worker_send_message (GKDBusWorker  *worker,
-                             GDBusMessage  *message,
-                             GError       **error)
+_g_kdbus_worker_send_message (GKDBusWorker  *worker,
+                              GDBusMessage  *message,
+                              GError       **error)
 {
   return _g_kdbus_send (worker, message, error);
 }
 
-/* TODO */
-void
-g_kdbus_worker_flush_sync (GKDBusWorker *worker)
+gboolean
+_g_kdbus_worker_flush_sync (GKDBusWorker *worker)
 {
-  g_warning ("TODO: Implement sync flush");
+  return TRUE;
+}
+
+
+
+
+
+
+
+void
+_g_kdbus_worker_stop (GKDBusWorker *worker)
+{
+  g_object_unref (worker);
 }
 
 void
-g_kdbus_worker_stop (GKDBusWorker *worker)
+_g_kdbus_worker_close (GKDBusWorker       *worker,
+                       GCancellable       *cancellable,
+                       GSimpleAsyncResult *result)
 {
-  g_warning ("TODO: Implement worker stop");
+  worker->disconnected_callback (FALSE, NULL, worker->user_data);
+  g_simple_async_result_complete_in_idle (result);
 }
 
-void
-g_kdbus_worker_close (GKDBusWorker       *worker,
-                      GCancellable       *cancellable,
-                      GSimpleAsyncResult *result)
-{
-//  for (l = client->matches; l != NULL; l = l->next)
-//    match_free (l->data);
-//  g_list_free (client->matches);
-}
+
+
+
+
+
+
+
+
+
+
+
 
 
 /*
@@ -3410,7 +3430,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
             }
 */
           g_variant_get (body, "(&s)", &rule);
-          reply_body = _g_kdbus_AddMatch_tmp (worker, rule, &error);
+          reply_body = _g_kdbus_AddMatch (worker, rule, &error);
         }
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3423,7 +3443,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
           gchar *rule;
 
           g_variant_get (body, "(&s)", &rule);
-          reply_body = _g_kdbus_RemoveMatch_tmp (worker, rule, &error);
+          reply_body = _g_kdbus_RemoveMatch (worker, rule, &error);
         }
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3614,7 +3634,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
 
   g_dbus_message_set_serial (reply, -1);
-  g_kdbus_worker_send_message (worker, reply, NULL);
+  _g_kdbus_worker_send_message (worker, reply, NULL);
 
   if (error)
     g_error_free (error);

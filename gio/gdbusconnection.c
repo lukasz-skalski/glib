@@ -630,7 +630,7 @@ g_dbus_connection_dispose (GObject *object)
 
   if (connection->kdbus_worker != NULL)
     {
-      g_kdbus_worker_stop (connection->kdbus_worker);
+      _g_kdbus_worker_stop (connection->kdbus_worker);
       connection->kdbus_worker = NULL;
       if (alive_connections != NULL)
         g_warn_if_fail (g_hash_table_remove (alive_connections, connection));
@@ -1180,7 +1180,7 @@ g_dbus_connection_start_message_processing (GDBusConnection *connection)
   g_assert (connection->worker || connection->kdbus_worker);
 
   if (connection->kdbus_worker)
-    g_kdbus_worker_unfreeze (connection->kdbus_worker);
+    _g_kdbus_worker_unfreeze (connection->kdbus_worker);
   else
     _g_dbus_worker_unfreeze (connection->worker);
 }
@@ -1370,8 +1370,7 @@ g_dbus_connection_flush_sync (GDBusConnection  *connection,
 
   if (connection->kdbus_worker != NULL)
     {
-      g_kdbus_worker_flush_sync (connection->kdbus_worker);
-      ret = TRUE;
+      ret = _g_kdbus_worker_flush_sync (connection->kdbus_worker);
     }
   else if (connection->worker != NULL)
     {
@@ -1503,14 +1502,18 @@ g_dbus_connection_close (GDBusConnection     *connection,
   if (!check_initialized (connection))
     return;
 
-  g_assert (connection->worker != NULL);
-
   simple = g_simple_async_result_new (G_OBJECT (connection),
                                       callback,
                                       user_data,
                                       g_dbus_connection_close);
   g_simple_async_result_set_check_cancellable (simple, cancellable);
-  _g_dbus_worker_close (connection->worker, cancellable, simple);
+  if (connection->kdbus_worker)
+    _g_kdbus_worker_close (connection->kdbus_worker, cancellable, simple);
+  else if (connection->worker)
+    _g_dbus_worker_close (connection->worker, cancellable, simple);
+  else
+    g_assert_not_reached();
+
   g_object_unref (simple);
 }
 
@@ -1602,6 +1605,7 @@ g_dbus_connection_close_sync (GDBusConnection  *connection,
       SyncCloseData data;
 
       context = g_main_context_new ();
+
       g_main_context_push_thread_default (context);
       data.loop = g_main_loop_new (context, TRUE);
       data.result = NULL;
@@ -2251,7 +2255,7 @@ g_dbus_connection_send_message_unlocked (GDBusConnection   *connection,
                                  (gchar*) blob,
                                  blob_size);
   else
-    ret = g_kdbus_worker_send_message (connection->kdbus_worker, message, error);
+    ret = _g_kdbus_worker_send_message (connection->kdbus_worker, message, error);
 
   blob = NULL; /* since _g_dbus_worker_send_message() steals the blob */
 
@@ -2849,7 +2853,7 @@ on_worker_message_received (GDBusMessage *message,
   G_UNLOCK (message_bus_lock);
 
   //g_debug ("in on_worker_message_received");
-  g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
+  //g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
 
   g_object_ref (message);
   g_dbus_message_lock (message);
@@ -3215,12 +3219,12 @@ authenticated:
   initially_frozen = (connection->flags & G_DBUS_CONNECTION_FLAGS_DELAY_MESSAGE_PROCESSING) != 0;
 
   if (connection->kdbus_worker)
-   g_kdbus_worker_associate (connection->kdbus_worker,
-                             connection->capabilities,
-                             on_worker_message_received,
-                             on_worker_message_about_to_be_sent,
-                             on_worker_closed,
-                             connection);
+   _g_kdbus_worker_associate (connection->kdbus_worker,
+                              connection->capabilities,
+                              on_worker_message_received,
+                              on_worker_message_about_to_be_sent,
+                              on_worker_closed,
+                              connection);
   else
     connection->worker = _g_dbus_worker_new (connection->stream,
                                              connection->capabilities,
@@ -3273,7 +3277,7 @@ authenticated:
     }
 
   if (connection->kdbus_worker && !initially_frozen)
-    g_kdbus_worker_unfreeze (connection->kdbus_worker);
+    _g_kdbus_worker_unfreeze (connection->kdbus_worker);
 
   ret = TRUE;
  out:
@@ -4147,7 +4151,7 @@ g_dbus_connection_signal_subscribe (GDBusConnection     *connection,
                 _g_kdbus_subscribe_name_owner_changed (connection->kdbus_worker, signal_data->rule, arg0, NULL);
             }
           else
-            _g_kdbus_AddMatch (connection->kdbus_worker, signal_data->rule, NULL);
+            _g_kdbus_AddMatch_internal (connection->kdbus_worker, signal_data->rule, NULL);
         }
       else
         {
@@ -4238,7 +4242,7 @@ unsubscribe_id_internal (GDBusConnection *connection,
                * did, and releasing the lock later.
                */
               if (connection->kdbus_worker)
-                _g_kdbus_RemoveMatch (connection->kdbus_worker, signal_data->rule, NULL);
+                _g_kdbus_RemoveMatch_internal (connection->kdbus_worker, signal_data->rule, NULL);
               else
                 if (!is_signal_data_for_name_lost_or_acquired (signal_data))
                   remove_match_rule (connection, signal_data->rule);
