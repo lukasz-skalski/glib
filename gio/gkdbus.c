@@ -561,19 +561,22 @@ static void
 g_kdbus_worker_finalize (GObject *object)
 {
   GKDBusWorker *kdbus = G_KDBUS_WORKER (object);
+  GList *match;
 
   if (kdbus->kdbus_buffer != NULL)
     munmap (kdbus->kdbus_buffer, KDBUS_POOL_SIZE);
-
   kdbus->kdbus_buffer = NULL;
+
+  if (kdbus->unique_name != NULL)
+    g_free (kdbus->unique_name);
+  kdbus->unique_name = NULL;
+
+  for (match = kdbus->matches; match != NULL; match = match->next)
+    match_free (match->data);
+  g_list_free (kdbus->matches);
 
   if (kdbus->fd != -1 && !kdbus->closed)
     _g_kdbus_close (kdbus);
-
-  // TODO
-  //  for (l = client->matches; l != NULL; l = l->next)
-  //    match_free (l->data);
-  //  g_list_free (client->matches);
 
   G_OBJECT_CLASS (g_kdbus_worker_parent_class)->finalize (object);
 }
@@ -590,7 +593,7 @@ g_kdbus_worker_init (GKDBusWorker *kdbus)
   kdbus->fd = -1;
 
   kdbus->context = NULL;
-  kdbus->source = NULL;
+  kdbus->source = 0;
 
   kdbus->kdbus_buffer = NULL;
   kdbus->unique_name = NULL;
@@ -3408,22 +3411,6 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
         {
           gchar *rule;
 
-/* TODO
-          if (g_strcmp0 (signal_data->sender_unique_name, "org.freedesktop.DBus") == 0 &&
-              g_strcmp0 (signal_data->interface_name, "org.freedesktop.DBus") == 0 &&
-              g_strcmp0 (signal_data->object_path, "/org/freedesktop/DBus") == 0 &&
-              (g_strcmp0 (signal_data->member, "NameLost") == 0 ||
-               g_strcmp0 (signal_data->member, "NameAcquired") == 0 ||
-               g_strcmp0 (signal_data->member, "NameOwnerChanged") == 0))
-            {
-              if (g_strcmp0 (signal_data->member, "NameAcquired") == 0)
-                _g_kdbus_subscribe_name_acquired (connection->kdbus_worker, signal_data->rule, arg0, NULL);
-              else if (g_strcmp0 (signal_data->member, "NameLost") == 0)
-                _g_kdbus_subscribe_name_lost (connection->kdbus_worker, signal_data->rule, arg0, NULL);
-              else if (g_strcmp0 (signal_data->member, "NameOwnerChanged") == 0)
-                _g_kdbus_subscribe_name_owner_changed (connection->kdbus_worker, signal_data->rule, arg0, NULL);
-            }
-*/
           g_variant_get (body, "(&s)", &rule);
           reply_body = _g_kdbus_AddMatch (worker, rule, &error);
         }
