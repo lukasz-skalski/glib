@@ -2909,8 +2909,8 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
   msg->cookie = g_dbus_message_get_serial(message);
 
   /* TODO: only for debug purpose */
-  if (g_strcmp0 (kdbus->unique_name, g_dbus_message_get_destination (message)))
-    g_print ("Sending:\n%s\n", g_dbus_message_print (message, 2));
+  //if (g_strcmp0 (kdbus->unique_name, g_dbus_message_get_destination (message)))
+  //  g_print ("Sending:\n%s\n", g_dbus_message_print (message, 2));
 
   /* Message destination */
   dst_name = g_dbus_message_get_destination (message);
