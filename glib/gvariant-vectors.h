@@ -28,6 +28,9 @@ typedef struct
 void                    g_variant_vectors_init                          (GVariantVectors *vectors);
 
 
+void                    g_variant_vectors_deinit                        (GVariantVectors *vectors);
+
+
 gsize                   g_variant_vectors_append_pad                    (GVariantVectors *vectors,
                                                                          gsize            padding);
 
