@@ -2908,8 +2908,8 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
   msg->cookie = g_dbus_message_get_serial(message);
 
   /* TODO: only for debug purpose */
-  //if (g_strcmp0 (kdbus->unique_name, g_dbus_message_get_destination (message)))
-  //  g_print ("Sending:\n%s\n", g_dbus_message_print (message, 2));
+  if (g_strcmp0 (kdbus->unique_name, g_dbus_message_get_destination (message)))
+    g_print ("Sending:\n%s\n", g_dbus_message_print (message, 2));
 
   /* Message destination */
   dst_name = g_dbus_message_get_destination (message);
@@ -2918,7 +2918,6 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
       if (!g_strcmp0 (dst_name, "org.freedesktop.DBus"))
         {
           msg->dst_id = kdbus->unique_id;
-          dst_name = NULL;
         }
       else if (g_dbus_is_unique_name (dst_name))
         {
@@ -2933,7 +2932,6 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
            * names, so no need to perform error checking on strtoull.
            */
           msg->dst_id = strtoull (dst_name + 3, NULL, 10);
-          dst_name = NULL;
         }
       else
         {
@@ -3106,16 +3104,14 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
   else
     msg->cookie_reply = g_dbus_message_get_reply_serial(message);
 
-  if (g_dbus_message_get_message_type (message) == G_DBUS_MESSAGE_TYPE_SIGNAL)
-    msg->flags |= KDBUS_MSG_SIGNAL;
-
   /*
    * append bloom filter item for broadcast signals
    */
-  if (msg->dst_id == KDBUS_DST_ID_BROADCAST)
+  if (g_dbus_message_get_message_type (message) == G_DBUS_MESSAGE_TYPE_SIGNAL)
     {
       struct kdbus_bloom_filter *bloom_filter;
 
+      msg->flags |= KDBUS_MSG_SIGNAL;
       bloom_filter = g_kdbus_msg_append_bloom (msg, kdbus->bloom_size);
       if (bloom_filter == NULL)
         goto need_compact;
@@ -3453,20 +3449,30 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
       if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           GVariantBuilder builder;
-          GVariant *uid, *pid, *label;
+          GVariant *variant;
+          GVariant *label; /* TODO: Test on target with LSM */
+          guint32 uid, pid;
           gchar *name;
 
           g_variant_get (body, "(&s)", &name);
           g_variant_builder_init (&builder, G_VARIANT_TYPE ("(a{sv})"));
           g_variant_builder_open (&builder, G_VARIANT_TYPE ("a{sv}"));
 
-          uid = _g_kdbus_GetConnectionUnixUser (worker, name, NULL);
-          if (uid != NULL)
-            g_variant_builder_add (&builder, "{sv}", "UnixUserID", uid);
+          variant = _g_kdbus_GetConnectionUnixUser (worker, name, NULL);
+          if (variant != NULL)
+            {
+              g_variant_get (variant, "(u)", &uid);
+              g_variant_builder_add (&builder, "{sv}", "UnixUserID", g_variant_new_uint32 (uid));
+              g_variant_unref (variant);
+            }
 
-          pid = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
-          if (pid != NULL)
-            g_variant_builder_add (&builder, "{sv}", "ProcessID", pid);
+          variant = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
+          if (variant != NULL)
+            {
+              g_variant_get (variant, "(u)", &pid);
+              g_variant_builder_add (&builder, "{sv}", "ProcessID", g_variant_new_uint32 (pid));
+              g_variant_unref (variant);
+            }
 
           label = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &error);
           if (label != NULL)

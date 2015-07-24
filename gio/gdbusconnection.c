@@ -2853,7 +2853,7 @@ on_worker_message_received (GDBusMessage *message,
   G_UNLOCK (message_bus_lock);
 
   //g_debug ("in on_worker_message_received");
-  //g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
+  g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
 
   g_object_ref (message);
   g_dbus_message_lock (message);
