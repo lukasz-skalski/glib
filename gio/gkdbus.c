@@ -1,4 +1,4 @@
-/*  GIO - GLib Input, Output and Streaming Library
+/* GIO - GLib Input, Output and Streaming Library
  *
  * Copyright (C) 2013 Samsung Electronics
  *
@@ -139,7 +139,6 @@ struct _GKDBusWorker
   GSource           *source;
 
   gchar             *kdbus_buffer;
-
   gchar             *unique_name;
   guint64            unique_id;
 
@@ -157,9 +156,7 @@ struct _GKDBusWorker
 
   guchar             bus_id[16];
 
-#if 1
   GList             *matches;
-#endif
 
   GDBusCapabilityFlags                     capabilities;
   GDBusWorkerMessageReceivedCallback       message_received_callback;
@@ -176,11 +173,9 @@ static gssize  _g_kdbus_receive (GKDBusWorker  *kdbus,
                                  GCancellable  *cancellable,
                                  GError       **error);
 
-#if 1
 static gboolean    emulate_dbus_daemon       (GDBusMessage  *message);
 static gboolean    prepare_synthetic_reply   (GKDBusWorker  *worker,
                                               GDBusMessage  *message);
-#endif
 
 G_DEFINE_TYPE (GKDBusWorker, g_kdbus_worker, G_TYPE_OBJECT)
 
@@ -530,10 +525,6 @@ match_equal (Match *a, Match *b)
 {
   int i;
 
-  //if (a->eavesdrop != b->eavesdrop)
-  //  return FALSE;
-  //if (a->type != b->type)
-  //  return FALSE;
   if (a->n_elements != b->n_elements)
     return FALSE;
   for (i = 0; i < a->n_elements; i++)
@@ -598,14 +589,20 @@ g_kdbus_worker_init (GKDBusWorker *kdbus)
 {
   kdbus->fd = -1;
 
-  kdbus->unique_id = -1;
-  kdbus->unique_name = NULL;
+  kdbus->context = NULL;
+  kdbus->source = NULL;
 
   kdbus->kdbus_buffer = NULL;
+  kdbus->unique_name = NULL;
+  kdbus->unique_id = -1;
 
   kdbus->flags = KDBUS_HELLO_ACCEPT_FD;
   kdbus->attach_flags_send = _KDBUS_ATTACH_ALL;
   kdbus->attach_flags_recv = _KDBUS_ATTACH_ALL;
+
+  kdbus->bloom_size = 0;
+  kdbus->bloom_n_hash = 0;
+  kdbus->matches = NULL;
 }
 
 static gboolean
@@ -622,6 +619,11 @@ kdbus_ready (gint         fd,
   return G_SOURCE_CONTINUE;
 }
 
+
+/**
+ * _g_kdbus_open:
+ *
+ */
 gboolean
 _g_kdbus_open (GKDBusWorker  *worker,
                const gchar   *address,
@@ -1242,6 +1244,9 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
       return NULL;
     }
 
+  if (flag == G_BUS_CREDS_UNIQUE_NAME && g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return g_variant_new ("(s)", name);
+
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
     {
       g_set_error (error,
@@ -1326,27 +1331,24 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
 
             if (flag == G_BUS_CREDS_SELINUX_CONTEXT)
               {
-                GVariantBuilder *builder;
+                GVariantBuilder builder;
                 gchar *label;
                 gint counter;
-
-                builder = g_variant_builder_new (G_VARIANT_TYPE ("ay"));
 
                 label = g_strdup (item->str);
                 if (!label)
                   goto exit;
 
+                g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
                 for (counter = 0 ; counter < strlen (label) ; counter++)
                   {
-                    g_variant_builder_add (builder, "y", label);
+                    g_variant_builder_add (&builder, "y", label);
                     label++;
                   }
 
-                result = g_variant_new ("(ay)", builder);
-                g_variant_builder_unref (builder);
+                result = g_variant_builder_end (&builder);
                 g_free (label);
                 goto exit;
-
               }
             break;
 
@@ -1751,7 +1753,6 @@ _g_kdbus_AddMatch_internal (GKDBusWorker  *worker,
       memcpy (item->str, sender_name, sender_len);
     }
 
-  g_print ("Add Match: %s with cookie: %d\n", match_rule, (int)match->cookie);
   ret = ioctl(worker->fd, KDBUS_CMD_MATCH_ADD, cmd);
   if (ret < 0)
     {
@@ -2721,15 +2722,13 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
   g_variant_unref (body);
   g_variant_unref (parts[1]);
 
-  /* TODO: emulate dbus-daemon */
-#if 1
+  /* emulate dbus-daemon */
   if (emulate_dbus_daemon (message))
     {
       prepare_synthetic_reply (worker, message);
       g_object_unref (message);
       return 0;
     }
-#endif
 
   /* set 'sender' field */
   sender = g_strdup_printf (":1.%"G_GUINT64_FORMAT, (guint64) msg->src_id);
@@ -3276,8 +3275,6 @@ _g_kdbus_worker_close (GKDBusWorker       *worker,
  *
  */
 
-#if 1
-
 static gchar *introspect =
   "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
   "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
@@ -3451,8 +3448,40 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetConnectionCredentials"))
     {
-      //TODO
-      reply_body = g_variant_new ("()", NULL);
+      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+        {
+          GVariantBuilder builder;
+          GVariant *uid, *pid, *label;
+          gchar *name;
+
+          g_variant_get (body, "(&s)", &name);
+          g_variant_builder_init (&builder, G_VARIANT_TYPE ("(a{sv})"));
+          g_variant_builder_open (&builder, G_VARIANT_TYPE ("a{sv}"));
+
+          uid = _g_kdbus_GetConnectionUnixUser (worker, name, NULL);
+          if (uid != NULL)
+            g_variant_builder_add (&builder, "{sv}", "UnixUserID", uid);
+
+          pid = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
+          if (pid != NULL)
+            g_variant_builder_add (&builder, "{sv}", "ProcessID", pid);
+
+          label = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &error);
+          if (label != NULL)
+            g_variant_builder_add (&builder, "{sv}", "LinuxSecurityLabel", label);
+
+          g_variant_builder_close (&builder);
+          reply_body = g_variant_builder_end (&builder);
+
+          if (error != NULL)
+            {
+              g_variant_unref (reply_body);
+              reply_body = NULL;
+            }
+        }
+      else
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                     "Call to 'GetConnectionCredentials' has wrong args (expected s)");
     }
   else if (!g_strcmp0 (member, "GetConnectionSELinuxSecurityContext"))
     {
@@ -3642,5 +3671,3 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
   g_object_unref (reply);
   return TRUE;
 }
-
-#endif
