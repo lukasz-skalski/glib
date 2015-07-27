@@ -3656,8 +3656,8 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "UpdateActivationEnvironment"))
     {
-      //TODO
-      reply_body = g_variant_new ("()", NULL);
+      g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED,
+                   "'%s' method not supported", member);
     }
   else
     {
