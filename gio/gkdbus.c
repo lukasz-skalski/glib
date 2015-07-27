@@ -2900,6 +2900,7 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
   GVariantVectors body_vectors;
   struct kdbus_cmd_send send;
   const gchar *dst_name;
+  gboolean result = TRUE;
 
   g_return_val_if_fail (G_IS_KDBUS_WORKER (kdbus), -1);
 
@@ -3094,8 +3095,6 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
       }
   }
 
-  //GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
-
   /*
    * set message flags
    */
@@ -3156,10 +3155,12 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
           g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                        "%s", strerror(errno));
         }
-      return FALSE;
+      result = FALSE;
     }
 
-  return TRUE;
+  GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
+
+  return result;
 
 need_compact:
   /* We end up here if:
