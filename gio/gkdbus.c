@@ -866,6 +866,15 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
       return NULL;
     }
 
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_INVALID_ARGS,
+                   "Cannot acquire a service named '%s', because that is reserved", name);
+      return NULL;
+    }
+
   if (*name == ':')
     {
       g_set_error (error,
@@ -934,6 +943,15 @@ _g_kdbus_ReleaseName (GKDBusWorker     *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
+      return NULL;
+    }
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    {
+      g_set_error (error,
+                   G_DBUS_ERROR,
+                   G_DBUS_ERROR_INVALID_ARGS,
+                   "Cannot release a service named '%s', because that is owned by the bus", name);
       return NULL;
     }
 
@@ -1064,6 +1082,10 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
           g_variant_builder_add (builder, "s", item_name);
     }
 
+  /* org.freedesktop.DBus.ListNames */
+  if (list_name_type == 0)
+    g_variant_builder_add (builder, "s", "org.freedesktop.DBus");
+
   result = g_variant_new ("(as)", builder);
   g_variant_builder_unref (builder);
 
@@ -1123,7 +1145,6 @@ _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
 {
   GVariant *result;
   GVariantBuilder *builder;
-  GString *unique_name;
   gint ret;
 
   struct kdbus_info *name_list, *kname;
@@ -1162,7 +1183,6 @@ _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
 
   name_list = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd.offset);
 
-  unique_name = g_string_new (NULL);
   builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
   KDBUS_FOREACH(kname, name_list, cmd.list_size)
     {
@@ -1176,13 +1196,11 @@ _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
       if (strcmp(item_name, name))
         continue;
 
-      g_string_printf (unique_name, ":1.%llu", kname->id);
       g_variant_builder_add (builder, "s", item_name);
     }
 
   result = g_variant_new ("(as)", builder);
   g_variant_builder_unref (builder);
-  g_string_free (unique_name,TRUE);
 
   g_kdbus_free_data (worker, cmd.offset);
   return result;
@@ -1208,6 +1226,9 @@ _g_kdbus_NameHasOwner (GKDBusWorker  *worker,
                    "Given bus name \"%s\" is not valid", name);
       return NULL;
     }
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return g_variant_new ("(b)", TRUE);
 
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
     result = g_variant_new ("(b)", FALSE);
@@ -3410,7 +3431,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "AddMatch"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *rule;
 
@@ -3423,7 +3444,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "RemoveMatch"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *rule;
 
@@ -3436,7 +3457,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetConnectionCredentials"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           GVariantBuilder builder;
           GVariant *variant;
@@ -3483,7 +3504,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetConnectionSELinuxSecurityContext"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3498,7 +3519,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetConnectionUnixProcessID"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3511,7 +3532,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetConnectionUnixUser"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3532,7 +3553,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetNameOwner"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3569,7 +3590,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "ListQueuedOwners"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3582,7 +3603,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "NameHasOwner"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3595,7 +3616,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "ReleaseName"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
 
@@ -3616,7 +3637,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "RequestName"))
     {
-      if (g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
         {
           gchar *name;
           guint32 flags;
@@ -3626,7 +3647,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
         }
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'RequestName' has wrong args (expected s)");
+                     "Call to 'RequestName' has wrong args (expected su)");
     }
   else if (!g_strcmp0 (member, "StartServiceByName"))
     {
