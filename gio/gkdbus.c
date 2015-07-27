@@ -2712,6 +2712,8 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
   while (g_variant_iter_loop (fields_iter, "{tv}", &key, &value))
     g_dbus_message_set_header (message, key, value);
 
+  g_variant_iter_free (fields_iter);
+
   g_dbus_message_set_flags (message, flags);
   g_dbus_message_set_serial (message, serial);
   g_dbus_message_set_message_type (message, type);
