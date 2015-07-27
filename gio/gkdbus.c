@@ -3094,7 +3094,7 @@ _g_kdbus_send (GKDBusWorker        *kdbus,
       }
   }
 
-  GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
+  //GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
 
   /*
    * set message flags
