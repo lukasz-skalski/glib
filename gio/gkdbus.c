@@ -167,6 +167,7 @@ struct _GKDBusWorker
 
 static gboolean  _g_kdbus_send    (GKDBusWorker  *worker,
                                    GDBusMessage  *message,
+                                   gboolean       sync_reply,
                                    GError       **error);
 
 static void      _g_kdbus_receive (GKDBusWorker  *worker,
@@ -1031,6 +1032,7 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
                                GError       **error)
 {
   struct kdbus_cmd_info *cmd;
+  struct kdbus_info *conn_info;
   gssize size, len;
   gint ret;
 
@@ -1052,6 +1054,12 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
   cmd->size = size;
 
   ret = ioctl(worker->fd, KDBUS_CMD_CONN_INFO, cmd);
+  conn_info = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd->offset);
+
+  /* TODO: ??? activated names are considered not available ??? */
+  if (conn_info->flags & KDBUS_HELLO_ACTIVATOR)
+    ret = -1;
+
   g_kdbus_free_data (worker, cmd->offset);
 
   if (ret < 0)
@@ -1397,7 +1405,6 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
                              guint32        flags,
                              GError       **error)
 {
-  GVariant *result;
   guint32 status;
 
   if (!g_dbus_is_name (name))
@@ -1409,30 +1416,32 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
       return NULL;
     }
 
-/*
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return g_variant_new ("(u)", G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING);
+
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
     {
-      GVariant *ret;
+      GDBusMessage *message;
+      gint ret;
 
-      ret = g_dbus_connection_call_sync (connection, name, "/",
-                                         "org.freedesktop.DBus.Peer", "Ping",
-                                         NULL, G_VARIANT_TYPE ("(u)"),
-                                         G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
-      if (ret != NULL)
+      message = g_dbus_message_new_method_call (name, "/", "org.freedesktop.DBus.Peer", "Ping");
+      g_dbus_message_set_serial (message, -1);
+
+      ret = _g_kdbus_send (worker, message, TRUE, NULL);
+      if (!ret)
         {
-          status = G_BUS_START_SERVICE_REPLY_SUCCESS;
-          g_variant_unref (ret);
+          g_set_error (error,
+                       G_DBUS_ERROR,
+                       G_DBUS_ERROR_SERVICE_UNKNOWN,
+                       "The name %s was not provided by any .service files", name);
+          return NULL;
         }
-      else
-        return NULL;
+      status = G_BUS_START_SERVICE_REPLY_SUCCESS;
     }
   else
-*/
     status = G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING;
 
-  result = g_variant_new ("(u)", status);
-
-  return result;
+  return g_variant_new ("(u)", status);
 }
 
 
@@ -2843,6 +2852,7 @@ g_kdbus_msg_append_bloom (struct kdbus_msg  *msg,
 static gboolean
 _g_kdbus_send (GKDBusWorker  *worker,
                GDBusMessage  *message,
+               gboolean       sync_reply,
                GError       **error)
 {
   struct kdbus_msg *msg;
@@ -2851,7 +2861,7 @@ _g_kdbus_send (GKDBusWorker  *worker,
   const gchar *dst_name;
   gboolean result;
 
-  g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), -1);
+  g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), FALSE);
 
   msg = alloca (KDBUS_MSG_MAX_SIZE);
   result = TRUE;
@@ -3073,8 +3083,12 @@ _g_kdbus_send (GKDBusWorker  *worker,
     }
 
   send.size = sizeof (send);
-  send.flags = 0;
   send.msg_address = (gsize) msg;
+  if (sync_reply)
+      send.flags = KDBUS_SEND_SYNC_REPLY;
+  else
+      send.flags = 0;
+
 
   /*
    * send message
@@ -3103,11 +3117,19 @@ _g_kdbus_send (GKDBusWorker  *worker,
         }
       else
         {
-          g_error ("WTF? %d\n", errno);
+          g_warning ("WTF? %d\n", errno);
           g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                        "%s", strerror(errno));
         }
       result = FALSE;
+    }
+  else if (sync_reply)
+    {
+      struct kdbus_msg *msg;
+
+      msg = (struct kdbus_msg *)((guint8 *)worker->kdbus_buffer + send.reply.offset);
+      /* for future expansion */
+      g_kdbus_close_msg (worker, msg);
     }
 
   GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
@@ -3252,7 +3274,7 @@ _g_kdbus_worker_send_message (GKDBusWorker  *worker,
                               GDBusMessage  *message,
                               GError       **error)
 {
-  return _g_kdbus_send (worker, message, error);
+  return _g_kdbus_send (worker, message, FALSE, error);
 }
 
 gboolean
@@ -3629,8 +3651,17 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "StartServiceByName"))
     {
-      //TODO
-      reply_body = g_variant_new ("()", NULL);
+      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
+        {
+          gchar *name;
+          guint32 flags;
+
+          g_variant_get (body, "(&su)", &name, &flags);
+          reply_body = _g_kdbus_StartServiceByName (worker, name, flags, &error);
+        }
+      else
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                     "Call to 'StartServiceByName' has wrong args (expected su)");
     }
   else if (!g_strcmp0 (member, "UpdateActivationEnvironment"))
     {
