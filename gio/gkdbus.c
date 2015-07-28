@@ -623,9 +623,16 @@ g_kdbus_close_msg (GKDBusWorker      *worker,
   KDBUS_ITEM_FOREACH (item, msg, items)
     {
       if (item->type == KDBUS_ITEM_FDS)
-        ; //close_many(d->fds, (d->size - offsetof(struct kdbus_item, fds)) / sizeof(int));
+        {
+          guint cnt;
+          guint num_fds;
+
+          num_fds = (item->size - G_STRUCT_OFFSET(struct kdbus_item, fds)) / sizeof(int);
+          for (cnt = 0; cnt < num_fds; cnt++)
+            close(item->fds[cnt]);
+        }
       else if (item->type == KDBUS_ITEM_PAYLOAD_MEMFD)
-        ; //safe_close(d->memfd.fd);
+        close (item->memfd.fd);
     }
 
   offset = (guint8 *)msg - (guint8 *)worker->kdbus_buffer;
