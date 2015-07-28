@@ -2107,7 +2107,7 @@ _g_dbus_start_service_by_name (GDBusConnection  *connection,
   ret = G_BUS_START_SERVICE_REPLY_ERROR;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_StartServiceByName (connection->kdbus_worker, connection, name, flags, error);
+    result = _g_kdbus_StartServiceByName (connection->kdbus_worker, name, flags, error);
   else
     result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
                                           "org.freedesktop.DBus", "StartServiceByName",

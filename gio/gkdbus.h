@@ -127,7 +127,6 @@ GVariant *            _g_kdbus_GetConnectionSELinuxSecurityContext   (GKDBusWork
                                                                       GError          **error);
 
 GVariant *            _g_kdbus_StartServiceByName                    (GKDBusWorker     *worker,
-                                                                      GDBusConnection  *connection,
                                                                       const gchar      *name,
                                                                       guint32           flags,
                                                                       GError          **error);
