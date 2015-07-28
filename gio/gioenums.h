@@ -1289,6 +1289,9 @@ typedef enum {
  * @G_DBUS_MESSAGE_FLAGS_NO_REPLY_EXPECTED: A reply is not expected.
  * @G_DBUS_MESSAGE_FLAGS_NO_AUTO_START: The bus must not launch an
  * owner for the destination name in response to this message.
+ * @G_DBUS_MESSAGE_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION: Inform the
+ * receiving side that the caller is prepared to wait for interactive
+ * authorization.
  *
  * Message flags used in #GDBusMessage.
  *
@@ -1297,7 +1300,8 @@ typedef enum {
 typedef enum {
   G_DBUS_MESSAGE_FLAGS_NONE = 0,
   G_DBUS_MESSAGE_FLAGS_NO_REPLY_EXPECTED = (1<<0),
-  G_DBUS_MESSAGE_FLAGS_NO_AUTO_START = (1<<1)
+  G_DBUS_MESSAGE_FLAGS_NO_AUTO_START = (1<<1),
+  G_DBUS_MESSAGE_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION = (1<<2)
 } GDBusMessageFlags;
 
 /**
