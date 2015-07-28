@@ -246,7 +246,7 @@ g_bytes_new_take (gpointer data,
 {
   GBytesData *bytes;
 
-  bytes = g_bytes_allocate (sizeof (GBytesNotify), G_BYTES_TYPE_FREE, size);
+  bytes = g_bytes_allocate (sizeof (GBytesData), G_BYTES_TYPE_FREE, size);
   bytes->data = data;
 
   return (GBytes *) bytes;
