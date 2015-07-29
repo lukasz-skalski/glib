@@ -102,6 +102,14 @@ guint32                      _g_dbus_release_name                 (GDBusConnecti
                                                                    const gchar         *name,
                                                                    GError             **error);
 
+gboolean                     _g_dbus_add_match                    (GDBusConnection     *connection,
+                                                                   const gchar         *match_rule,
+                                                                   GError             **error);
+
+gboolean                     _g_dbus_remove_match                 (GDBusConnection     *connection,
+                                                                   const gchar         *match_rule,
+                                                                   GError             **error);
+
 gchar                       *_g_dbus_get_bus_id                   (GDBusConnection     *connection,
                                                                    GError             **error);
 

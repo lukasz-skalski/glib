@@ -377,7 +377,8 @@ invoke_get_name_owner (Client *client)
                                            client->name,
                                            NULL);
       process_get_name_owner (client, name_owner);
-      g_free (name_owner);
+      if (name_owner != NULL)
+        g_free (name_owner);
     }
   else
     {
@@ -405,8 +406,6 @@ process_start_service_by_name (Client   *client,
   if (result == G_BUS_START_SERVICE_REPLY_SUCCESS)
     invoke_get_name_owner (client);
   else if (result == G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING)
-    invoke_get_name_owner (client);
-  else if (result == G_BUS_START_SERVICE_REPLY_ERROR)
     invoke_get_name_owner (client);
   else
     {

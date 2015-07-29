@@ -1605,7 +1605,6 @@ g_dbus_connection_close_sync (GDBusConnection  *connection,
       SyncCloseData data;
 
       context = g_main_context_new ();
-
       g_main_context_push_thread_default (context);
       data.loop = g_main_loop_new (context, TRUE);
       data.result = NULL;
@@ -1717,6 +1716,80 @@ _g_dbus_release_name (GDBusConnection  *connection,
     release_name_reply = G_BUS_RELEASE_NAME_FLAGS_ERROR;
 
   return (GBusReleaseNameReplyFlags) release_name_reply;
+}
+
+/**
+ *
+ *
+ */
+gboolean
+_g_dbus_add_match (GDBusConnection  *connection,
+                   const gchar      *match_rule,
+                   GError          **error)
+{
+  GVariant *result;
+  gboolean ret;
+
+  g_return_val_if_fail (G_IS_DBUS_CONNECTION (connection), FALSE);
+  g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+  result = NULL;
+  ret = FALSE;
+
+  if (match_rule[0] == '-')
+    return ret;
+
+  if (connection->kdbus_worker)
+    result = _g_kdbus_AddMatch (connection->kdbus_worker, match_rule, error);
+  else
+    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                          "org.freedesktop.DBus", "AddMatch",
+                                          g_variant_new ("(s)", match_rule), NULL,
+                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+  if (result != NULL)
+    {
+      ret = TRUE;
+      g_variant_unref (result);
+    }
+
+  return ret;
+}
+
+/**
+ *
+ *
+ */
+gboolean
+_g_dbus_remove_match (GDBusConnection  *connection,
+                      const gchar      *match_rule,
+                      GError          **error)
+{
+  GVariant *result;
+  gboolean ret;
+
+  g_return_val_if_fail (G_IS_DBUS_CONNECTION (connection), FALSE);
+  g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+  result = NULL;
+  ret = FALSE;
+
+  if (match_rule[0] == '-')
+    return ret;
+
+  if (connection->kdbus_worker)
+    result = _g_kdbus_RemoveMatch (connection->kdbus_worker, match_rule, error);
+  else
+    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                          "org.freedesktop.DBus", "RemoveMatch",
+                                          g_variant_new ("(s)", match_rule), NULL,
+                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+  if (result != NULL)
+    {
+      ret = TRUE;
+      g_variant_unref (result);
+    }
+
+  return ret;
 }
 
 /**
@@ -3219,12 +3292,12 @@ authenticated:
   initially_frozen = (connection->flags & G_DBUS_CONNECTION_FLAGS_DELAY_MESSAGE_PROCESSING) != 0;
 
   if (connection->kdbus_worker)
-   _g_kdbus_worker_associate (connection->kdbus_worker,
-                              connection->capabilities,
-                              on_worker_message_received,
-                              on_worker_message_about_to_be_sent,
-                              on_worker_closed,
-                              connection);
+    _g_kdbus_worker_associate (connection->kdbus_worker,
+                               connection->capabilities,
+                               on_worker_message_received,
+                               on_worker_message_about_to_be_sent,
+                               on_worker_closed,
+                               connection);
   else
     connection->worker = _g_dbus_worker_new (connection->stream,
                                              connection->capabilities,

@@ -414,7 +414,11 @@ has_connection (Client *client)
                                                              client);
   /* attempt to acquire the name */
   request_name_reply = _g_dbus_request_name (client->connection, client->name, client->flags, &error);
-  g_assert_no_error (error);
+  if (request_name_reply == G_BUS_REQUEST_NAME_FLAGS_ERROR)
+    {
+      g_warning ("Error requesting name %s: %s", client->name, error->message);
+      g_error_free (error);
+    }
 
   process_request_name_reply (client, request_name_reply);
 }

@@ -1056,7 +1056,6 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
   ret = ioctl(worker->fd, KDBUS_CMD_CONN_INFO, cmd);
   conn_info = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd->offset);
 
-  /* TODO: ??? activated names are considered not available ??? */
   if (conn_info->flags & KDBUS_HELLO_ACTIVATOR)
     ret = -1;
 
@@ -1245,11 +1244,6 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
     }
 
   conn_info = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd->offset);
-
-  /*
-  if (conn_info->flags & KDBUS_HELLO_ACTIVATOR)
-    {}
-  */
 
   if (flag == G_BUS_CREDS_UNIQUE_NAME)
     {
@@ -2779,7 +2773,6 @@ g_kdbus_msg_append_item (struct kdbus_msg  *msg,
   if (msg->size + item_size > KDBUS_MSG_MAX_SIZE)
     return FALSE;
 
-  /* align */
   msg->size += (-msg->size) & 7;
   item = (struct kdbus_item *) ((guchar *) msg + msg->size);
   item->type = type;
@@ -2832,7 +2825,6 @@ g_kdbus_msg_append_bloom (struct kdbus_msg  *msg,
   if (msg->size + bloom_item_size > KDBUS_MSG_MAX_SIZE)
     return NULL;
 
-  /* align */
   msg->size += (-msg->size) & 7;
   bloom_item = (struct kdbus_item *) ((guchar *) msg + msg->size);
 
@@ -3089,7 +3081,6 @@ _g_kdbus_send (GKDBusWorker  *worker,
   else
       send.flags = 0;
 
-
   /*
    * send message
    */
@@ -3115,9 +3106,14 @@ _g_kdbus_send (GKDBusWorker  *worker,
           g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
                        "Too many pending messages on the receiver side");
         }
+      else if (errno == EMSGSIZE)
+        {
+          g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+                       "The size of the message is excessive");
+        }
       else
         {
-          g_warning ("WTF? %d\n", errno);
+          g_warning ("Error: %s\n", strerror(errno));
           g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                        "%s", strerror(errno));
         }
@@ -3141,10 +3137,13 @@ need_compact:
    *  - too many kdbus_items
    *  - too large kdbus_msg size
    *  - too much vector data
-   *
-   * We need to compact the message before sending it.
    */
-  g_assert_not_reached ();
+  g_warning ("Message serialisation error");
+  g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+               "message serialisation error");
+
+  GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
+  return FALSE;
 }
 
 /* ---------------------------------------------------------------------------------------------------- */
@@ -3461,7 +3460,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
         {
           GVariantBuilder builder;
           GVariant *variant;
-          GVariant *label; /* TODO: Test on target with LSM */
+          GVariant *label;
           guint32 uid, pid;
           gchar *name;
 
@@ -3670,12 +3669,11 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else
     {
-      /* unsupported method - set error here */
+      /* unsupported method */
       g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
                    "org.freedesktop.DBus does not understand message %s", member);
     }
 
-  /* xxx */
   if (reply_body == NULL)
     {
       gchar *dbus_error_name;
