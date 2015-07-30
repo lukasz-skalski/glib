@@ -1971,7 +1971,7 @@ initable_init (GInitable     *initable,
   async_initable_init_first (G_ASYNC_INITABLE (initable));
 
   data = g_new0 (InitableAsyncInitableData, 1);
-  data->context = g_main_context_new ();
+  data->context = g_main_context_ref_thread_default ();
   data->loop = g_main_loop_new (data->context, FALSE);
 
   g_main_context_push_thread_default (data->context);
