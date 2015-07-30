@@ -2765,6 +2765,21 @@ get_uint32_header (GDBusMessage            *message,
   return ret;
 }
 
+static guint64
+get_uint64_header (GDBusMessage            *message,
+                   GDBusMessageHeaderField  header_field)
+{
+  GVariant *value;
+  guint64 ret;
+
+  ret = 0;
+  value = g_hash_table_lookup (message->headers, GUINT_TO_POINTER (header_field));
+  if (value != NULL && g_variant_is_of_type (value, G_VARIANT_TYPE_UINT64))
+    ret = g_variant_get_uint64 (value);
+
+  return ret;
+}
+
 static const gchar *
 get_string_header (GDBusMessage            *message,
                    GDBusMessageHeaderField  header_field)
@@ -2823,6 +2838,16 @@ set_uint32_header (GDBusMessage             *message,
 }
 
 static void
+set_uint64_header (GDBusMessage             *message,
+                   GDBusMessageHeaderField   header_field,
+                   guint64                   value)
+{
+  g_dbus_message_set_header (message,
+                             header_field,
+                             g_variant_new_uint64 (value));
+}
+
+static void
 set_string_header (GDBusMessage             *message,
                    GDBusMessageHeaderField   header_field,
                    const gchar              *value)
@@ -2868,7 +2893,7 @@ guint32
 g_dbus_message_get_reply_serial (GDBusMessage  *message)
 {
   g_return_val_if_fail (G_IS_DBUS_MESSAGE (message), 0);
-  return get_uint32_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL);
+  return get_uint64_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL);
 }
 
 /**
@@ -2885,7 +2910,7 @@ g_dbus_message_set_reply_serial (GDBusMessage  *message,
                                  guint32        value)
 {
   g_return_if_fail (G_IS_DBUS_MESSAGE (message));
-  set_uint32_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL, value);
+  set_uint64_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL, value);
 }
 
 /* ---------------------------------------------------------------------------------------------------- */

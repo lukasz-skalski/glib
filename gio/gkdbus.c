@@ -2536,7 +2536,7 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
 
   KDBUS_ITEM_FOREACH(item, msg, items)
     {
-      if (item->size <= KDBUS_ITEM_HEADER_SIZE)
+      if (item->size < KDBUS_ITEM_HEADER_SIZE)
         g_error("[KDBUS] %llu bytes - invalid data record\n", item->size);
 
       data_size = item->size - KDBUS_ITEM_HEADER_SIZE;
