@@ -2893,7 +2893,7 @@ guint32
 g_dbus_message_get_reply_serial (GDBusMessage  *message)
 {
   g_return_val_if_fail (G_IS_DBUS_MESSAGE (message), 0);
-  return get_uint64_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL);
+  return get_uint32_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL);
 }
 
 /**
@@ -2910,7 +2910,7 @@ g_dbus_message_set_reply_serial (GDBusMessage  *message,
                                  guint32        value)
 {
   g_return_if_fail (G_IS_DBUS_MESSAGE (message));
-  set_uint64_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL, value);
+  set_uint32_header (message, G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL, value);
 }
 
 /* ---------------------------------------------------------------------------------------------------- */
