@@ -2926,7 +2926,20 @@ on_worker_message_received (GDBusMessage *message,
   G_UNLOCK (message_bus_lock);
 
   //g_debug ("in on_worker_message_received");
-  g_print ("Received:\n%s\n", g_dbus_message_print (message, 2));
+  if (_g_dbus_connection_is_kdbus (connection))
+    {
+      if (G_UNLIKELY (_g_dbus_debug_message ()))
+        {
+          gchar *s;
+          _g_dbus_debug_print_lock ();
+          g_print ("========================================================================\n"
+                   "GDBus-debug:Message:\n"
+                   "  <<<< RECEIVED D-Bus message\n");
+          s = g_dbus_message_print (message, 2);
+          g_print ("%s", s);
+          g_free (s);
+        }
+    }
 
   g_object_ref (message);
   g_dbus_message_lock (message);

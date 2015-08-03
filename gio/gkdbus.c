@@ -2649,10 +2649,12 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
         case KDBUS_ITEM_AUXGROUPS:
         case KDBUS_ITEM_OWNED_NAME:
         case KDBUS_ITEM_NAME:
+        case KDBUS_ITEM_DST_ID:
+        case KDBUS_ITEM_BLOOM_FILTER:
           break;
 
         default:
-          g_error ("[KDBUS] DBUS_PAYLOAD: Unknown filed - %lld", item->type);
+          g_warning ("[KDBUS] DBUS_PAYLOAD: Unknown filed - %lld", item->type);
           break;
         }
     }
@@ -2870,10 +2872,6 @@ _g_kdbus_send (GKDBusWorker  *worker,
   msg->src_id = worker->unique_id;
   msg->cookie = g_dbus_message_get_serial(message);
 
-  /* TODO: only for debug purpose */
-  if (g_strcmp0 (kdbus->unique_name, g_dbus_message_get_destination (message)))
-    g_print ("Sending:\n%s\n", g_dbus_message_print (message, 2));
-
   /* Message destination */
   dst_name = g_dbus_message_get_destination (message);
   if (dst_name != NULL)
@@ -3085,6 +3083,25 @@ _g_kdbus_send (GKDBusWorker  *worker,
       send.flags = KDBUS_SEND_SYNC_REPLY;
   else
       send.flags = 0;
+
+  /*
+   * show debug
+   */
+  if (g_strcmp0 (worker->unique_name, dst_name))
+    {
+      if (G_UNLIKELY (_g_dbus_debug_message ()))
+        {
+          gchar *s;
+          _g_dbus_debug_print_lock ();
+          g_print ("========================================================================\n"
+                   "GDBus-debug:Message:\n"
+                   "  >>>> SENT D-Bus/kdbus message\n");
+          s = g_dbus_message_print (message, 2);
+          g_print ("%s", s);
+          g_free (s);
+          _g_dbus_debug_print_unlock ();
+        }
+    }
 
   /*
    * send message
