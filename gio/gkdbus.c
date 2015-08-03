@@ -2952,13 +2952,11 @@ _g_kdbus_send (GKDBusWorker  *worker,
             /* These are the normal header fields that get passed
              * straight through.
              */
-            case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
-              g_variant_builder_add (&builder, "{tv}", key_int, g_variant_new_uint64 (g_dbus_message_get_reply_serial(message)));
-            break;
             case G_DBUS_MESSAGE_HEADER_FIELD_PATH:
             case G_DBUS_MESSAGE_HEADER_FIELD_INTERFACE:
             case G_DBUS_MESSAGE_HEADER_FIELD_MEMBER:
             case G_DBUS_MESSAGE_HEADER_FIELD_ERROR_NAME:
+            case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
             case G_DBUS_MESSAGE_HEADER_FIELD_DESTINATION:
               g_variant_builder_add (&builder, "{tv}", key_int, value);
               /* This is a little bit gross.
