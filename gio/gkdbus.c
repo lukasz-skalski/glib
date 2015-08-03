@@ -623,6 +623,10 @@ g_kdbus_close_msg (GKDBusWorker      *worker,
 
   KDBUS_ITEM_FOREACH (item, msg, items)
     {
+      if (0)
+        {
+        }
+      /*
       if (item->type == KDBUS_ITEM_FDS)
         {
           guint cnt;
@@ -632,6 +636,7 @@ g_kdbus_close_msg (GKDBusWorker      *worker,
           for (cnt = 0; cnt < num_fds; cnt++)
             close(item->fds[cnt]);
         }
+      */
       else if (item->type == KDBUS_ITEM_PAYLOAD_MEMFD)
         close (item->memfd.fd);
     }
