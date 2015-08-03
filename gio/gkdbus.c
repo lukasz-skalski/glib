@@ -558,7 +558,7 @@ _g_kdbus_open (GKDBusWorker  *worker,
  * _g_kdbus_close:
  *
  */
-void
+gboolean
 _g_kdbus_close (GKDBusWorker *worker)
 {
   g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), FALSE);
@@ -576,6 +576,7 @@ _g_kdbus_close (GKDBusWorker *worker)
   worker->fd = -1;
 
   worker->closed = TRUE;
+  return TRUE;
 }
 
 
@@ -2682,7 +2683,7 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
         {
           case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
             g_dbus_message_set_reply_serial (message, (guint32) g_variant_get_uint64 (value));
-            break;
+            continue;
 
           default:
             g_dbus_message_set_header (message, key, value);

@@ -77,7 +77,7 @@ gboolean              _g_kdbus_open                          (GKDBusWorker      
                                                               const gchar         *address,
                                                               GError             **error);
 
-void                  _g_kdbus_close                         (GKDBusWorker        *kdbus);
+gboolean              _g_kdbus_close                         (GKDBusWorker        *kdbus);
 
 gboolean              _g_kdbus_is_closed                     (GKDBusWorker        *kdbus);
 
