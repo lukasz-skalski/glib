@@ -2938,6 +2938,7 @@ on_worker_message_received (GDBusMessage *message,
           s = g_dbus_message_print (message, 2);
           g_print ("%s", s);
           g_free (s);
+          _g_dbus_debug_print_unlock ();
         }
     }
 

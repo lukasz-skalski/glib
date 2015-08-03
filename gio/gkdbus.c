@@ -2677,7 +2677,18 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
   g_variant_unref (parts[0]);
 
   while (g_variant_iter_loop (fields_iter, "{tv}", &key, &value))
-    g_dbus_message_set_header (message, key, value);
+    {
+      switch (key)
+        {
+          case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
+            g_dbus_message_set_reply_serial (message, (guint32) g_variant_get_uint64 (value));
+            break;
+
+          default:
+            g_dbus_message_set_header (message, key, value);
+            continue;
+        }
+    }
 
   g_variant_iter_free (fields_iter);
 
@@ -2955,11 +2966,14 @@ _g_kdbus_send (GKDBusWorker  *worker,
             /* These are the normal header fields that get passed
              * straight through.
              */
+            case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
+              g_variant_builder_add (&builder, "{tv}", key_int, g_variant_new_uint64 (g_dbus_message_get_reply_serial(message)));
+              continue;
+
             case G_DBUS_MESSAGE_HEADER_FIELD_PATH:
             case G_DBUS_MESSAGE_HEADER_FIELD_INTERFACE:
             case G_DBUS_MESSAGE_HEADER_FIELD_MEMBER:
             case G_DBUS_MESSAGE_HEADER_FIELD_ERROR_NAME:
-            case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
             case G_DBUS_MESSAGE_HEADER_FIELD_DESTINATION:
               g_variant_builder_add (&builder, "{tv}", key_int, value);
               /* This is a little bit gross.
