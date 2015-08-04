@@ -133,6 +133,8 @@ struct _GKDBusWorker
   gint               fd;
 
   GMainContext      *context;
+  GMainLoop         *loop;
+  GThread           *thread;
   GSource           *source;
 
   gchar             *kdbus_buffer;
@@ -565,6 +567,14 @@ _g_kdbus_close (GKDBusWorker *worker)
 
   g_main_context_unref (worker->context);
   worker->context = NULL;
+
+  g_main_loop_quit (worker->loop);
+  g_main_loop_unref (worker->loop);
+  worker->loop = NULL;
+
+  g_thread_join (worker->thread);
+  g_thread_unref (worker->thread);
+  worker->thread = NULL;
 
   close (worker->fd);
   worker->fd = -1;
@@ -3285,6 +3295,8 @@ g_kdbus_worker_init (GKDBusWorker *worker)
   worker->fd = -1;
 
   worker->context = NULL;
+  worker->loop = NULL;
+  worker->thread = NULL;
   worker->source = 0;
 
   worker->kdbus_buffer = NULL;
@@ -3300,6 +3312,16 @@ g_kdbus_worker_init (GKDBusWorker *worker)
   worker->matches = NULL;
 }
 
+static gpointer
+_g_kdbus_worker_thread (gpointer _data)
+{
+  GKDBusWorker *worker = (GKDBusWorker *)_data;
+
+  g_main_loop_run (worker->loop);
+
+  return NULL;
+}
+
 GKDBusWorker *
 _g_kdbus_worker_new (const gchar  *address,
                      GError      **error)
@@ -3312,6 +3334,10 @@ _g_kdbus_worker_new (const gchar  *address,
       g_object_unref (worker);
       return NULL;
     }
+
+  worker->context = g_main_context_new ();
+  worker->loop = g_main_loop_new (worker->context, FALSE);
+  worker->thread = g_thread_new ("gkdbus", _g_kdbus_worker_thread, worker);
 
   return worker;
 }
@@ -3356,7 +3382,6 @@ _g_kdbus_worker_unfreeze (GKDBusWorker *worker)
   if (worker->source != NULL)
     return;
 
-  worker->context = g_main_context_ref_thread_default ();
   worker->source = g_unix_fd_source_new (worker->fd, G_IO_IN);
 
   g_source_set_callback (worker->source, (GSourceFunc) g_kdbus_ready, worker, NULL);
