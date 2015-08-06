@@ -51,8 +51,10 @@
 #include "glibintl.h"
 #include "gunixfdmessage.h"
 
+#define DBUS_DAEMON_EMULATION
+
 #define KDBUS_MSG_MAX_SIZE         8192
-#define KDBUS_DEFAULT_TIMEOUT_NS   200000000LU
+#define KDBUS_DEFAULT_TIMEOUT_NS   2000000000LU
 #define KDBUS_POOL_SIZE            (16 * 1024LU * 1024LU)
 #define KDBUS_ALIGN8(l)            (((l) + 7) & ~7)
 #define KDBUS_ALIGN8_PTR(p)        ((void*) (uintptr_t)(p))
@@ -174,9 +176,11 @@ static gboolean  _g_kdbus_send    (GKDBusWorker  *worker,
 static void      _g_kdbus_receive (GKDBusWorker  *worker,
                                    GError       **error);
 
-static gboolean   emulate_dbus_daemon       (GDBusMessage  *message);
-static gboolean   prepare_synthetic_reply   (GKDBusWorker  *worker,
-                                             GDBusMessage  *message);
+#ifdef DBUS_DAEMON_EMULATION
+static gboolean       emulate_dbus_daemon       (GDBusMessage  *message);
+static GDBusMessage  *prepare_synthetic_reply   (GKDBusWorker  *worker,
+                                                 GDBusMessage  *message);
+#endif /* DBUS_DAEMON_EMULATION */
 
 G_DEFINE_TYPE (GKDBusWorker, g_kdbus_worker, G_TYPE_OBJECT)
 
@@ -565,7 +569,7 @@ _g_kdbus_close (GKDBusWorker *worker)
   g_return_val_if_fail (G_IS_KDBUS_WORKER (worker), FALSE);
 
   if (worker->closed)
-    return;
+    return TRUE;
 
   g_source_destroy (worker->source);
   worker->source = 0;
@@ -1423,13 +1427,15 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
     {
       GDBusMessage *message;
+      GDBusMessage *reply;
       gint ret;
+
+      reply = NULL;
 
       message = g_dbus_message_new_method_call (name, "/", "org.freedesktop.DBus.Peer", "Ping");
       g_dbus_message_set_serial (message, -1);
 
-      //ret = _g_kdbus_send (worker, message, TRUE, NULL);
-      ret = 0;
+      ret = _g_kdbus_send (worker, message, &reply, 25000, NULL);
       if (!ret)
         {
           g_set_error (error,
@@ -1438,6 +1444,7 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
                        "The name %s was not provided by any .service files", name);
           return NULL;
         }
+      g_object_unref (reply);
       status = G_BUS_START_SERVICE_REPLY_SUCCESS;
     }
   else
@@ -2708,14 +2715,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
   g_variant_unref (body);
   g_variant_unref (parts[1]);
 
-  /* emulate dbus-daemon */
-  if (emulate_dbus_daemon (message))
-    {
-      prepare_synthetic_reply (worker, message);
-      g_object_unref (message);
-      return 0;
-    }
-
   /* set 'sender' field */
   sender = g_strdup_printf (":1.%"G_GUINT64_FORMAT, (guint64) msg->src_id);
   if (!g_strcmp0 (worker->unique_name, sender))
@@ -2723,10 +2722,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
   else
     g_dbus_message_set_sender (message, sender);
   g_free (sender);
-
-//  (* worker->message_received_callback) (message, worker->user_data);
-
-//  g_object_unref (message);
 
   return message;
 }
@@ -2768,10 +2763,26 @@ again:
      {
        GDBusMessage *message;
 
-       message = NULL;
-
        message = g_kdbus_decode_dbus_msg (worker, msg);
-       (* worker->message_received_callback) (message, worker->user_data);
+
+       if (0)
+         {
+         }
+#ifdef DBUS_DAEMON_EMULATION
+       else if (emulate_dbus_daemon (message))
+         {
+           GDBusMessage *synth_reply;
+
+           synth_reply = prepare_synthetic_reply (worker, message);
+           _g_kdbus_worker_send_message (worker, synth_reply, 0, NULL);
+           g_object_unref (synth_reply);
+         }
+#endif
+       else
+         {
+           (* worker->message_received_callback) (message, worker->user_data);
+         }
+
        g_object_unref (message);
      }
    else if (msg->payload_type == KDBUS_PAYLOAD_KERNEL)
@@ -3176,6 +3187,19 @@ _g_kdbus_send (GKDBusWorker  *worker,
 
       *out_reply = g_kdbus_decode_dbus_msg (worker, kmsg);
       g_kdbus_close_msg (worker, kmsg);
+
+      if (G_UNLIKELY (_g_dbus_debug_message ()))
+        {
+          gchar *s;
+          _g_dbus_debug_print_lock ();
+          g_print ("========================================================================\n"
+                   "GDBus-debug:Message:\n"
+                   "  <<<< RECEIVED D-Bus message\n");
+          s = g_dbus_message_print (*out_reply, 2);
+          g_print ("%s", s);
+          g_free (s);
+          _g_dbus_debug_print_unlock ();
+        }
     }
 
   GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
@@ -3334,6 +3358,15 @@ _g_kdbus_worker_send_message_sync (GKDBusWorker  *worker,
                                    gint           timeout_msec,
                                    GError       **error)
 {
+
+#ifdef DBUS_DAEMON_EMULATION
+  if (emulate_dbus_daemon (message))
+    {
+      *out_reply = prepare_synthetic_reply (worker, message);
+       return TRUE;
+    }
+#endif /* DBUS_DAEMON_EMULATION */
+
   return _g_kdbus_send (worker, message, out_reply, timeout_msec, error);
 }
 
@@ -3359,6 +3392,8 @@ _g_kdbus_worker_close (GKDBusWorker       *worker,
 }
 
 /* ---------------------------------------------------------------------------------------------------- */
+
+#ifdef DBUS_DAEMON_EMULATION
 
 static gchar *introspect =
   "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
@@ -3469,7 +3504,7 @@ emulate_dbus_daemon (GDBusMessage *message)
  * prepare_synthetic_reply:
  *
  */
-gboolean
+GDBusMessage *
 prepare_synthetic_reply (GKDBusWorker  *worker,
                          GDBusMessage  *message)
 {
@@ -3605,7 +3640,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "GetId"))
     {
-      if (body == NULL)
+      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         reply_body = _g_kdbus_GetBusId (worker, &error);
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3626,7 +3661,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "Hello"))
     {
-      if (body == NULL)
+      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         reply_body = _g_kdbus_Hello (worker, &error);
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3634,7 +3669,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "ListActivatableNames"))
     {
-      if (body == NULL)
+      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         reply_body = _g_kdbus_GetListNames (worker, 1, &error);
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3642,7 +3677,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "ListNames"))
     {
-      if (body == NULL)
+      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         reply_body = _g_kdbus_GetListNames (worker, 0, &error);
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3689,7 +3724,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
   else if (!g_strcmp0 (member, "ReloadConfig"))
     {
-      if (body == NULL)
+      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         reply_body = g_variant_new ("()", NULL);
       else
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -3750,13 +3785,13 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
 
   g_dbus_message_set_serial (reply, -1);
-  _g_kdbus_worker_send_message (worker, reply, 0, NULL);
 
   if (error)
     g_error_free (error);
 
-  g_object_unref (reply);
-  return TRUE;
+  return reply;
 }
+
+#endif /* DBUS_DAEMON_EMULATION */
 
 /* ---------------------------------------------------------------------------------------------------- */

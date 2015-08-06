@@ -2856,6 +2856,7 @@ g_dbus_connection_send_message_with_reply_sync (GDBusConnection        *connecti
   reply = NULL;
 
   /* kdbus supports blocking synchronous calls, so let's use them instead of mainloops */
+  /* TODO: Add support for GCancellable - https://developer.gnome.org/gio/stable/GTask.html */
   if (connection->kdbus_worker)
     {
       volatile guint32 serial;
