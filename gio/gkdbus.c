@@ -43,6 +43,11 @@
 #include <sys/uio.h>
 #endif
 
+#define DBUS_DAEMON_EMULATION
+#ifdef DBUS_DAEMON_EMULATION
+#include "gkdbusfakedaemon.h"
+#endif
+
 #include <glib/gstdio.h>
 #include <glib/glib-private.h>
 #include <gio/gio.h>
@@ -50,8 +55,6 @@
 
 #include "glibintl.h"
 #include "gunixfdmessage.h"
-
-#define DBUS_DAEMON_EMULATION
 
 #define KDBUS_MSG_MAX_SIZE         8192
 #define KDBUS_DEFAULT_TIMEOUT_NS   2000000000LU
@@ -175,12 +178,6 @@ static gboolean  _g_kdbus_send    (GKDBusWorker  *worker,
 
 static void      _g_kdbus_receive (GKDBusWorker  *worker,
                                    GError       **error);
-
-#ifdef DBUS_DAEMON_EMULATION
-static gboolean       emulate_dbus_daemon       (GDBusMessage  *message);
-static GDBusMessage  *prepare_synthetic_reply   (GKDBusWorker  *worker,
-                                                 GDBusMessage  *message);
-#endif /* DBUS_DAEMON_EMULATION */
 
 G_DEFINE_TYPE (GKDBusWorker, g_kdbus_worker, G_TYPE_OBJECT)
 
@@ -2769,11 +2766,11 @@ again:
          {
          }
 #ifdef DBUS_DAEMON_EMULATION
-       else if (emulate_dbus_daemon (message))
+       else if (_is_message_to_dbus_daemon (message))
          {
            GDBusMessage *synth_reply;
 
-           synth_reply = prepare_synthetic_reply (worker, message);
+           synth_reply = _dbus_daemon_synthetic_reply (worker, message);
            _g_kdbus_worker_send_message (worker, synth_reply, 0, NULL);
            g_object_unref (synth_reply);
          }
@@ -3360,10 +3357,10 @@ _g_kdbus_worker_send_message_sync (GKDBusWorker  *worker,
 {
 
 #ifdef DBUS_DAEMON_EMULATION
-  if (emulate_dbus_daemon (message))
+  if (_is_message_to_dbus_daemon (message))
     {
-      *out_reply = prepare_synthetic_reply (worker, message);
-       return TRUE;
+      *out_reply = _dbus_daemon_synthetic_reply (worker, message);
+      return TRUE;
     }
 #endif /* DBUS_DAEMON_EMULATION */
 
@@ -3390,408 +3387,3 @@ _g_kdbus_worker_close (GKDBusWorker       *worker,
   worker->disconnected_callback (FALSE, NULL, worker->user_data);
   g_simple_async_result_complete_in_idle (result);
 }
-
-/* ---------------------------------------------------------------------------------------------------- */
-
-#ifdef DBUS_DAEMON_EMULATION
-
-static gchar *introspect =
-  "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
-  "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
-  "<node>\n"
-  " <interface name=\"org.freedesktop.DBus.Introspectable\">\n"
-  "  <method name=\"Introspect\">\n"
-  "   <arg name=\"data\" type=\"s\" direction=\"out\"/>\n"
-  "  </method>\n"
-  " </interface>\n"
-  " <interface name=\"org.freedesktop.DBus\">\n"
-  "  <method name=\"AddMatch\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "  </method>\n"
-  "  <method name=\"RemoveMatch\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "  </method>\n"
-  "  <method name=\"GetConnectionCredentials\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"a{sv}\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"GetConnectionSELinuxSecurityContext\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"ay\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"GetConnectionUnixProcessID\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"GetConnectionUnixUser\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"GetId\">\n"
-  "   <arg type=\"s\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"GetNameOwner\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"s\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"Hello\">\n"
-  "   <arg type=\"s\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"ListActivatableNames\">\n"
-  "   <arg type=\"as\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"ListNames\">\n"
-  "   <arg type=\"as\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"ListQueuedOwners\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"as\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"NameHasOwner\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"b\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"ReleaseName\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"ReloadConfig\">\n"
-  "  </method>\n"
-  "  <method name=\"RequestName\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"StartServiceByName\">\n"
-  "   <arg type=\"s\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"in\"/>\n"
-  "   <arg type=\"u\" direction=\"out\"/>\n"
-  "  </method>\n"
-  "  <method name=\"UpdateActivationEnvironment\">\n"
-  "   <arg type=\"a{ss}\" direction=\"in\"/>\n"
-  "  </method>\n"
-  "  <signal name=\"NameAcquired\">\n"
-  "   <arg type=\"s\"/>\n"
-  "  </signal>\n"
-  "  <signal name=\"NameLost\">\n"
-  "   <arg type=\"s\"/>\n"
-  "  </signal>\n"
-  "  <signal name=\"NameOwnerChanged\">\n"
-  "   <arg type=\"s\"/>\n"
-  "   <arg type=\"s\"/>\n"
-  "   <arg type=\"s\"/>\n"
-  "  </signal>\n"
-  " </interface>\n"
-  "</node>\n";
-
-
-/**
- * emulate_dbus_daemon:
- *
- */
-gboolean
-emulate_dbus_daemon (GDBusMessage *message)
-{
-  return g_strcmp0 (g_dbus_message_get_destination (message), "org.freedesktop.DBus") == 0 &&
-         (g_strcmp0 (g_dbus_message_get_interface (message), "org.freedesktop.DBus") == 0 ||
-          g_strcmp0 (g_dbus_message_get_interface (message), "org.freedesktop.DBus.Introspectable") == 0) &&
-         (g_strcmp0 (g_dbus_message_get_path (message), "/org/freedesktop/DBus") == 0 ||
-          g_strcmp0 (g_dbus_message_get_path (message), "/") == 0);
-}
-
-
-/**
- * prepare_synthetic_reply:
- *
- */
-GDBusMessage *
-prepare_synthetic_reply (GKDBusWorker  *worker,
-                         GDBusMessage  *message)
-{
-  GDBusMessage *reply;
-  GVariant *body, *reply_body;
-  GError *error;
-  const gchar *member;
-
-  reply = NULL;
-  reply_body = NULL;
-  error = NULL;
-
-  member = g_dbus_message_get_member (message);
-  body = g_dbus_message_get_body (message);
-
-  if (!g_strcmp0 (member, "Introspect"))
-    {
-      reply_body = g_variant_new ("(s)", introspect);
-    }
-  else if (!g_strcmp0 (member, "AddMatch"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *rule;
-
-          g_variant_get (body, "(&s)", &rule);
-          reply_body = _g_kdbus_AddMatch (worker, rule, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'AddMatch' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "RemoveMatch"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *rule;
-
-          g_variant_get (body, "(&s)", &rule);
-          reply_body = _g_kdbus_RemoveMatch (worker, rule, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'RemoveMatch' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "GetConnectionCredentials"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          GVariantBuilder builder;
-          GVariant *variant;
-          GVariant *label;
-          guint32 uid, pid;
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          g_variant_builder_init (&builder, G_VARIANT_TYPE ("(a{sv})"));
-          g_variant_builder_open (&builder, G_VARIANT_TYPE ("a{sv}"));
-
-          variant = _g_kdbus_GetConnectionUnixUser (worker, name, NULL);
-          if (variant != NULL)
-            {
-              g_variant_get (variant, "(u)", &uid);
-              g_variant_builder_add (&builder, "{sv}", "UnixUserID", g_variant_new_uint32 (uid));
-              g_variant_unref (variant);
-            }
-
-          variant = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
-          if (variant != NULL)
-            {
-              g_variant_get (variant, "(u)", &pid);
-              g_variant_builder_add (&builder, "{sv}", "ProcessID", g_variant_new_uint32 (pid));
-              g_variant_unref (variant);
-            }
-
-          label = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &error);
-          if (label != NULL)
-            g_variant_builder_add (&builder, "{sv}", "LinuxSecurityLabel", label);
-
-          g_variant_builder_close (&builder);
-          reply_body = g_variant_builder_end (&builder);
-
-          if (error != NULL)
-            {
-              g_variant_unref (reply_body);
-              reply_body = NULL;
-            }
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'GetConnectionCredentials' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "GetConnectionSELinuxSecurityContext"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &error);
-          if (reply_body == NULL && error == NULL)
-            g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED, "Operation not supported");
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'GetConnectionSELinuxSecurityContext' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "GetConnectionUnixProcessID"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetConnectionUnixProcessID (worker, name, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'GetConnectionUnixProcessID' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "GetConnectionUnixUser"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetConnectionUnixUser (worker, name, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'GetConnectionUnixUser' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "GetId"))
-    {
-      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_GetBusId (worker, &error);
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'GetId' has wrong args");
-    }
-  else if (!g_strcmp0 (member, "GetNameOwner"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetNameOwner (worker, name, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'GetNameOwner' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "Hello"))
-    {
-      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_Hello (worker, &error);
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'Hello' has wrong args");
-    }
-  else if (!g_strcmp0 (member, "ListActivatableNames"))
-    {
-      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_GetListNames (worker, 1, &error);
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'ListActivatableNames' has wrong args");
-    }
-  else if (!g_strcmp0 (member, "ListNames"))
-    {
-      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_GetListNames (worker, 0, &error);
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'ListNames' has wrong args");
-    }
-  else if (!g_strcmp0 (member, "ListQueuedOwners"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetListQueuedOwners (worker, name, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'ListQueuedOwners' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "NameHasOwner"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_NameHasOwner (worker, name, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'NameHasOwner' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "ReleaseName"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
-        {
-          gchar *name;
-
-          g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_ReleaseName (worker, name, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'ReleaseName' has wrong args (expected s)");
-    }
-  else if (!g_strcmp0 (member, "ReloadConfig"))
-    {
-      if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = g_variant_new ("()", NULL);
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'ReloadConfig' has wrong args");
-    }
-  else if (!g_strcmp0 (member, "RequestName"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
-        {
-          gchar *name;
-          guint32 flags;
-
-          g_variant_get (body, "(&su)", &name, &flags);
-          reply_body = _g_kdbus_RequestName (worker, name, flags, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'RequestName' has wrong args (expected su)");
-    }
-  else if (!g_strcmp0 (member, "StartServiceByName"))
-    {
-      if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
-        {
-          gchar *name;
-          guint32 flags;
-
-          g_variant_get (body, "(&su)", &name, &flags);
-          reply_body = _g_kdbus_StartServiceByName (worker, name, flags, &error);
-        }
-      else
-        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                     "Call to 'StartServiceByName' has wrong args (expected su)");
-    }
-  else if (!g_strcmp0 (member, "UpdateActivationEnvironment"))
-    {
-      g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED,
-                   "'%s' method not supported", member);
-    }
-  else
-    {
-      /* unsupported method */
-      g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
-                   "org.freedesktop.DBus does not understand message %s", member);
-    }
-
-  if (reply_body == NULL)
-    {
-      gchar *dbus_error_name;
-
-      dbus_error_name = g_dbus_error_encode_gerror (error);
-      reply = g_dbus_message_new_method_error (message, dbus_error_name, error->message);
-      g_free (dbus_error_name);
-    }
-  else
-    {
-      reply = g_dbus_message_new_method_reply (message);
-      g_dbus_message_set_body (reply, reply_body);
-    }
-
-  g_dbus_message_set_serial (reply, -1);
-
-  if (error)
-    g_error_free (error);
-
-  return reply;
-}
-
-#endif /* DBUS_DAEMON_EMULATION */
-
-/* ---------------------------------------------------------------------------------------------------- */

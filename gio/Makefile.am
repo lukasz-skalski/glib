@@ -85,6 +85,7 @@ gdbus_sources = 							\
 	gdbusobjectmanagerclient.h	gdbusobjectmanagerclient.c	\
 	gdbusobjectmanagerserver.h	gdbusobjectmanagerserver.c	\
 	gkdbus.h			gkdbus.c			\
+	gkdbusfakedaemon.h		gkdbusfakedaemon.c		\
 	gtestdbus.h			gtestdbus.c			\
 	$(NULL)
 
