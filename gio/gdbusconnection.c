@@ -2328,7 +2328,7 @@ g_dbus_connection_send_message_unlocked (GDBusConnection   *connection,
                                  (gchar*) blob,
                                  blob_size);
   else
-    ret = _g_kdbus_worker_send_message (connection->kdbus_worker, message, error);
+    ret = _g_kdbus_worker_send_message (connection->kdbus_worker, message, -1, error);
 
   blob = NULL; /* since _g_dbus_worker_send_message() steals the blob */
 
@@ -2853,37 +2853,73 @@ g_dbus_connection_send_message_with_reply_sync (GDBusConnection        *connecti
   g_return_val_if_fail (timeout_msec >= 0 || timeout_msec == -1, NULL);
   g_return_val_if_fail (error == NULL || *error == NULL, NULL);
 
-  data = g_new0 (SendMessageSyncData, 1);
+  reply = NULL;
 
+  /* kdbus supports blocking synchronous calls, so let's use them instead of mainloops */
   if (connection->kdbus_worker)
-    data->context = g_main_context_ref_thread_default ();
+    {
+      volatile guint32 serial;
+      guint32 serial_to_use;
+
+      CONNECTION_LOCK (connection);
+
+      if (timeout_msec == -1)
+        timeout_msec = 25 * 1000;
+
+      if (out_serial == NULL)
+        out_serial = &serial;
+      else
+        *out_serial = 0;
+
+      if (!check_unclosed (connection,
+                           (flags & SEND_MESSAGE_FLAGS_INITIALIZING) ? MAY_BE_UNINITIALIZED : 0,
+                           error))
+        goto out;
+
+      if (!(flags & G_DBUS_SEND_MESSAGE_FLAGS_PRESERVE_SERIAL))
+        g_dbus_message_set_serial (message, ++connection->last_serial);
+
+      serial_to_use = g_dbus_message_get_serial (message);
+
+      g_dbus_message_lock (message);
+
+      if (out_serial != NULL)
+        *out_serial = serial_to_use;
+
+      _g_kdbus_worker_send_message_sync (connection->kdbus_worker, message, &reply, timeout_msec, error);
+
+      CONNECTION_UNLOCK (connection);
+    }
   else
-     data->context = g_main_context_new ();
+    {
+      data = g_new0 (SendMessageSyncData, 1);
+      data->context = g_main_context_new ();
+      data->loop = g_main_loop_new (data->context, FALSE);
 
-  data->loop = g_main_loop_new (data->context, FALSE);
+      g_main_context_push_thread_default (data->context);
 
-  g_main_context_push_thread_default (data->context);
+      g_dbus_connection_send_message_with_reply (connection,
+                                                 message,
+                                                 flags,
+                                                 timeout_msec,
+                                                 out_serial,
+                                                 cancellable,
+                                                 (GAsyncReadyCallback) send_message_with_reply_sync_cb,
+                                                 data);
+      g_main_loop_run (data->loop);
+      reply = g_dbus_connection_send_message_with_reply_finish (connection,
+                                                                data->res,
+                                                                error);
 
-  g_dbus_connection_send_message_with_reply (connection,
-                                             message,
-                                             flags,
-                                             timeout_msec,
-                                             out_serial,
-                                             cancellable,
-                                             (GAsyncReadyCallback) send_message_with_reply_sync_cb,
-                                             data);
-  g_main_loop_run (data->loop);
-  reply = g_dbus_connection_send_message_with_reply_finish (connection,
-                                                            data->res,
-                                                            error);
+      g_main_context_pop_thread_default (data->context);
 
-  g_main_context_pop_thread_default (data->context);
+      g_main_context_unref (data->context);
+      g_main_loop_unref (data->loop);
+      g_object_unref (data->res);
+      g_free (data);
+    }
 
-  g_main_context_unref (data->context);
-  g_main_loop_unref (data->loop);
-  g_object_unref (data->res);
-  g_free (data);
-
+out:
   return reply;
 }
 

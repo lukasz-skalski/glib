@@ -61,6 +61,13 @@ void                  _g_kdbus_worker_unfreeze               (GKDBusWorker      
 
 gboolean              _g_kdbus_worker_send_message           (GKDBusWorker        *worker,
                                                               GDBusMessage        *message,
+                                                              gint                 timeout_msec,
+                                                              GError             **error);
+
+gboolean              _g_kdbus_worker_send_message_sync      (GKDBusWorker        *worker,
+                                                              GDBusMessage        *message,
+                                                              GDBusMessage       **out_reply,
+                                                              gint                 timeout_msec,
                                                               GError             **error);
 
 void                  _g_kdbus_worker_stop                   (GKDBusWorker        *worker);

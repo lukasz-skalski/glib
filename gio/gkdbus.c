@@ -52,7 +52,7 @@
 #include "gunixfdmessage.h"
 
 #define KDBUS_MSG_MAX_SIZE         8192
-#define KDBUS_TIMEOUT_NS           2000000000LU
+#define KDBUS_DEFAULT_TIMEOUT_NS   200000000LU
 #define KDBUS_POOL_SIZE            (16 * 1024LU * 1024LU)
 #define KDBUS_ALIGN8(l)            (((l) + 7) & ~7)
 #define KDBUS_ALIGN8_PTR(p)        ((void*) (uintptr_t)(p))
@@ -167,7 +167,8 @@ struct _GKDBusWorker
 
 static gboolean  _g_kdbus_send    (GKDBusWorker  *worker,
                                    GDBusMessage  *message,
-                                   gboolean       sync_reply,
+                                   GDBusMessage **reply,
+                                   gint           timeout_msec,
                                    GError       **error);
 
 static void      _g_kdbus_receive (GKDBusWorker  *worker,
@@ -1427,7 +1428,8 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
       message = g_dbus_message_new_method_call (name, "/", "org.freedesktop.DBus.Peer", "Ping");
       g_dbus_message_set_serial (message, -1);
 
-      ret = _g_kdbus_send (worker, message, TRUE, NULL);
+      //ret = _g_kdbus_send (worker, message, TRUE, NULL);
+      ret = 0;
       if (!ret)
         {
           g_set_error (error,
@@ -2722,11 +2724,11 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
     g_dbus_message_set_sender (message, sender);
   g_free (sender);
 
-  (* worker->message_received_callback) (message, worker->user_data);
+//  (* worker->message_received_callback) (message, worker->user_data);
 
-  g_object_unref (message);
+//  g_object_unref (message);
 
-  return 0;
+  return message;
 }
 
 
@@ -2763,7 +2765,15 @@ again:
    msg = (struct kdbus_msg *)((guint8 *)worker->kdbus_buffer + recv.msg.offset);
 
    if (msg->payload_type == KDBUS_PAYLOAD_DBUS)
-     g_kdbus_decode_dbus_msg (worker, msg);
+     {
+       GDBusMessage *message;
+
+       message = NULL;
+
+       message = g_kdbus_decode_dbus_msg (worker, msg);
+       (* worker->message_received_callback) (message, worker->user_data);
+       g_object_unref (message);
+     }
    else if (msg->payload_type == KDBUS_PAYLOAD_KERNEL)
      g_kdbus_decode_kernel_msg (worker, msg);
    else
@@ -2863,7 +2873,8 @@ g_kdbus_msg_append_bloom (struct kdbus_msg  *msg,
 static gboolean
 _g_kdbus_send (GKDBusWorker  *worker,
                GDBusMessage  *message,
-               gboolean       sync_reply,
+               GDBusMessage **out_reply,
+               gint           timeout_msec,
                GError       **error)
 {
   struct kdbus_msg *msg;
@@ -3074,7 +3085,7 @@ _g_kdbus_send (GKDBusWorker  *worker,
                 ((g_dbus_message_get_flags (message) & G_DBUS_MESSAGE_FLAGS_NO_AUTO_START) ? KDBUS_MSG_NO_AUTO_START : 0);
 
   if ((msg->flags) & KDBUS_MSG_EXPECT_REPLY)
-    msg->timeout_ns = 1000LU * g_get_monotonic_time() + KDBUS_TIMEOUT_NS;
+    msg->timeout_ns = 1000LU * g_get_monotonic_time() + KDBUS_DEFAULT_TIMEOUT_NS;
   else
     msg->cookie_reply = g_dbus_message_get_reply_serial(message);
 
@@ -3094,10 +3105,11 @@ _g_kdbus_send (GKDBusWorker  *worker,
 
   send.size = sizeof (send);
   send.msg_address = (gsize) msg;
-  if (sync_reply)
-      send.flags = KDBUS_SEND_SYNC_REPLY;
+
+  if (out_reply != NULL)
+    send.flags = KDBUS_SEND_SYNC_REPLY;
   else
-      send.flags = 0;
+    send.flags = 0;
 
   /*
    * show debug
@@ -3156,13 +3168,14 @@ _g_kdbus_send (GKDBusWorker  *worker,
         }
       result = FALSE;
     }
-  else if (sync_reply)
+  else if (out_reply != NULL)
     {
-      struct kdbus_msg *msg;
+      struct kdbus_msg *kmsg;
 
-      msg = (struct kdbus_msg *)((guint8 *)worker->kdbus_buffer + send.reply.offset);
-      /* for future expansion */
-      g_kdbus_close_msg (worker, msg);
+      kmsg = (struct kdbus_msg *)((guint8 *)worker->kdbus_buffer + send.reply.offset);
+
+      *out_reply = g_kdbus_decode_dbus_msg (worker, kmsg);
+      g_kdbus_close_msg (worker, kmsg);
     }
 
   GLIB_PRIVATE_CALL(g_variant_vectors_deinit) (&body_vectors);
@@ -3308,9 +3321,20 @@ _g_kdbus_worker_unfreeze (GKDBusWorker *worker)
 gboolean
 _g_kdbus_worker_send_message (GKDBusWorker  *worker,
                               GDBusMessage  *message,
+                              gint           timeout_msec,
                               GError       **error)
 {
-  return _g_kdbus_send (worker, message, FALSE, error);
+  return _g_kdbus_send (worker, message, NULL, timeout_msec, error);
+}
+
+gboolean
+_g_kdbus_worker_send_message_sync (GKDBusWorker  *worker,
+                                   GDBusMessage  *message,
+                                   GDBusMessage **out_reply,
+                                   gint           timeout_msec,
+                                   GError       **error)
+{
+  return _g_kdbus_send (worker, message, out_reply, timeout_msec, error);
 }
 
 gboolean
@@ -3726,7 +3750,7 @@ prepare_synthetic_reply (GKDBusWorker  *worker,
     }
 
   g_dbus_message_set_serial (reply, -1);
-  _g_kdbus_worker_send_message (worker, reply, NULL);
+  _g_kdbus_worker_send_message (worker, reply, 0, NULL);
 
   if (error)
     g_error_free (error);
