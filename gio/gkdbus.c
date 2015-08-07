@@ -678,8 +678,12 @@ g_kdbus_translate_nameowner_flags (GBusNameOwnerFlags   flags,
 /**
  * _g_kdbus_Hello:
  *
+ * Gets the unique name
+ *
+ * Returns: the unique name or NULL. Do not free this string,
+ * it is owned by GKDBusWorker.
  */
-GVariant *
+const gchar *
 _g_kdbus_Hello (GKDBusWorker  *worker,
                 GError       **error)
 {
@@ -748,7 +752,7 @@ _g_kdbus_Hello (GKDBusWorker  *worker,
   memcpy (worker->bus_id, cmd->id128, 16);
 
   worker->unique_id = cmd->id;
-  (void)asprintf(&worker->unique_name, ":1.%llu", (unsigned long long) cmd->id);
+  asprintf (&worker->unique_name, ":1.%llu", (unsigned long long) cmd->id);
 
   /* read bloom filters parameters */
   bloom = NULL;
@@ -777,24 +781,29 @@ _g_kdbus_Hello (GKDBusWorker  *worker,
       return NULL;
     }
 
-  return g_variant_new ("(s)", worker->unique_name);
+  return worker->unique_name;
 }
 
 
 /**
  * _g_kdbus_RequestName:
  *
+ * Synchronously acquires name on the bus and returns status code.
+ *
+ * Returns: status code or G_BUS_REQUEST_NAME_FLAGS_ERROR
+ * if error is set.
  */
-GVariant *
+GBusRequestNameReplyFlags
 _g_kdbus_RequestName (GKDBusWorker        *worker,
                       const gchar         *name,
                       GBusNameOwnerFlags   flags,
                       GError             **error)
 {
+  GBusRequestNameReplyFlags status;
   struct kdbus_cmd *cmd;
   guint64 kdbus_flags;
   gssize len, size;
-  gint status, ret;
+  gint ret;
 
   status = G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER;
 
@@ -804,7 +813,7 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      return G_BUS_REQUEST_NAME_FLAGS_ERROR;
     }
 
   if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
@@ -813,7 +822,7 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Cannot acquire a service named '%s', because that is reserved", name);
-      return NULL;
+      return G_BUS_REQUEST_NAME_FLAGS_ERROR;
     }
 
   if (*name == ':')
@@ -822,7 +831,7 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Cannot acquire a service starting with ':' such as \"%s\"", name);
-      return NULL;
+      return G_BUS_REQUEST_NAME_FLAGS_ERROR;
     }
 
   g_kdbus_translate_nameowner_flags (flags, &kdbus_flags);
@@ -849,29 +858,34 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
                        g_io_error_from_errno (errno),
                        _("Error while acquiring name: %s"),
                        g_strerror (errno));
-          return NULL;
+          return G_BUS_REQUEST_NAME_FLAGS_ERROR;
         }
     }
 
   if (cmd->return_flags & KDBUS_NAME_IN_QUEUE)
     status = G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE;
 
-  return g_variant_new ("(u)", status);
+  return status;
 }
 
 
 /**
  * _g_kdbus_ReleaseName:
  *
+ * Synchronously releases name on the bus and returns status code.
+ *
+ * Returns: status code or G_BUS_RELEASE_NAME_FLAGS_ERROR
+ * if error is set.
  */
-GVariant *
+GBusReleaseNameReplyFlags
 _g_kdbus_ReleaseName (GKDBusWorker  *worker,
                       const gchar   *name,
                       GError       **error)
 {
+  GBusReleaseNameReplyFlags status;
   struct kdbus_cmd *cmd;
   gssize len, size;
-  gint status, ret;
+  gint ret;
 
   status = G_BUS_RELEASE_NAME_FLAGS_RELEASED;
 
@@ -881,7 +895,7 @@ _g_kdbus_ReleaseName (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      return G_BUS_RELEASE_NAME_FLAGS_ERROR;
     }
 
   if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
@@ -890,7 +904,7 @@ _g_kdbus_ReleaseName (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Cannot release a service named '%s', because that is owned by the bus", name);
-      return NULL;
+      return G_BUS_RELEASE_NAME_FLAGS_ERROR;
     }
 
   if (*name == ':')
@@ -899,7 +913,7 @@ _g_kdbus_ReleaseName (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Cannot release a service starting with ':' such as \"%s\"", name);
-      return NULL;
+      return G_BUS_RELEASE_NAME_FLAGS_ERROR;
     }
 
   len = strlen(name) + 1;
@@ -923,35 +937,35 @@ _g_kdbus_ReleaseName (GKDBusWorker  *worker,
                        g_io_error_from_errno (errno),
                        _("Error while releasing name: %s"),
                        g_strerror (errno));
-          return NULL;
+          return G_BUS_RELEASE_NAME_FLAGS_ERROR;
         }
     }
 
-  return g_variant_new ("(u)", status);
+  return status;
 }
 
 
 /**
  * _g_kdbus_GetBusId:
  *
+ * Synchronously returns the unique ID of the bus.
+ *
+ * Returns: the unique ID of the bus or NULL if error is set.
+ * Free with g_free().
  */
-GVariant *
+gchar *
 _g_kdbus_GetBusId (GKDBusWorker  *worker,
                    GError       **error)
 {
-  GVariant *result;
-  GString  *result_str;
+  GString  *result;
   guint     cnt;
 
-  result_str = g_string_new (NULL);
+  result = g_string_new (NULL);
 
   for (cnt=0; cnt<16; cnt++)
-    g_string_append_printf (result_str, "%02x", worker->bus_id[cnt]);
+    g_string_append_printf (result, "%02x", worker->bus_id[cnt]);
 
-  result = g_variant_new ("(s)", result_str->str);
-  g_string_free (result_str, TRUE);
-
-  return result;
+  return g_string_free (result, FALSE);
 }
 
 

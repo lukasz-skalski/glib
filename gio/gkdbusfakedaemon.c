@@ -273,7 +273,14 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
   else if (!g_strcmp0 (member, "GetId"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_GetBusId (worker, &local_error);
+        {
+          gchar *bus_id;
+
+          bus_id = _g_kdbus_GetBusId (worker, &local_error);
+          reply_body = g_variant_new ("(s)", bus_id);
+
+          g_free (bus_id);
+        }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetId' has wrong args");
@@ -294,7 +301,13 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
   else if (!g_strcmp0 (member, "Hello"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_Hello (worker, &local_error);
+        {
+          const gchar *unique_name;
+
+          unique_name = _g_kdbus_Hello (worker, &local_error);
+          if (reply_body != NULL)
+            reply_body = g_variant_new ("(s)", unique_name);
+        }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'Hello' has wrong args");
@@ -345,10 +358,14 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
+          GBusReleaseNameReplyFlags status;
           gchar *name;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_ReleaseName (worker, name, &local_error);
+
+          status = _g_kdbus_ReleaseName (worker, name, &local_error);
+          if (status != G_BUS_RELEASE_NAME_FLAGS_ERROR)
+            reply_body = g_variant_new ("(u)", status);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -366,11 +383,15 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
         {
-          gchar *name;
+          GBusRequestNameReplyFlags status;
           guint32 flags;
+          gchar *name;
 
           g_variant_get (body, "(&su)", &name, &flags);
-          reply_body = _g_kdbus_RequestName (worker, name, flags, &local_error);
+
+          status = _g_kdbus_RequestName (worker, name, flags, &local_error);
+          if (status != G_BUS_REQUEST_NAME_FLAGS_ERROR)
+            reply_body = g_variant_new ("(u)", status);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,

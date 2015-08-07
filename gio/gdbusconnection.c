@@ -1654,13 +1654,12 @@ _g_dbus_request_name (GDBusConnection     *connection,
   g_return_val_if_fail (error == NULL || *error == NULL, G_BUS_RELEASE_NAME_FLAGS_ERROR);
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_RequestName (connection->kdbus_worker, name, flags, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                          "org.freedesktop.DBus", "RequestName",
-                                          g_variant_new ("(su)", name, flags), G_VARIANT_TYPE ("(u)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_RequestName (connection->kdbus_worker, name, flags, error);
 
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                        "org.freedesktop.DBus", "RequestName",
+                                        g_variant_new ("(su)", name, flags), G_VARIANT_TYPE ("(u)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(u)", &request_name_reply);
@@ -1700,13 +1699,12 @@ _g_dbus_release_name (GDBusConnection  *connection,
   g_return_val_if_fail (error == NULL || *error == NULL, G_BUS_RELEASE_NAME_FLAGS_ERROR);
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_ReleaseName (connection->kdbus_worker, name, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                          "org.freedesktop.DBus", "ReleaseName",
-                                          g_variant_new ("(s)", name), G_VARIANT_TYPE ("(u)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_ReleaseName (connection->kdbus_worker, name, error);
 
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                        "org.freedesktop.DBus", "ReleaseName",
+                                        g_variant_new ("(s)", name), G_VARIANT_TYPE ("(u)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(u)", &release_name_reply);
@@ -1820,17 +1818,12 @@ _g_dbus_get_bus_id (GDBusConnection  *connection,
   bus_id = NULL;
 
   if (connection->kdbus_worker)
-    {
-      result = _g_kdbus_GetBusId (connection->kdbus_worker, error);
-    }
-  else
-    {
-      result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                            "org.freedesktop.DBus", "GetId",
-                                            NULL, G_VARIANT_TYPE ("(s)"),
-                                            G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
-    }
+    return _g_kdbus_GetBusId (connection->kdbus_worker, error);
 
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                        "org.freedesktop.DBus", "GetId",
+                                        NULL, G_VARIANT_TYPE ("(s)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(s)", &bus_id);
@@ -3375,7 +3368,13 @@ authenticated:
 
       if (connection->kdbus_worker)
         {
-          hello_result = _g_kdbus_Hello (connection->kdbus_worker, &connection->initialization_error);
+          const gchar *unique_name;
+
+          unique_name = _g_kdbus_Hello (connection->kdbus_worker, &connection->initialization_error);
+          if (unique_name == NULL)
+            goto out;
+
+          connection->bus_unique_name = g_strdup (unique_name);
         }
       else
         {
@@ -3390,14 +3389,12 @@ authenticated:
                                                       -1,
                                                       NULL, /* TODO: cancellable */
                                                       &connection->initialization_error);
+          if (hello_result == NULL)
+            goto out;
+
+          g_variant_get (hello_result, "(s)", &connection->bus_unique_name);
+          g_variant_unref (hello_result);
         }
-
-      if (hello_result == NULL)
-        goto out;
-
-      g_variant_get (hello_result, "(s)", &connection->bus_unique_name);
-      g_variant_unref (hello_result);
-      //g_debug ("unique name is '%s'", connection->bus_unique_name);
     }
 
   if (connection->kdbus_worker && !initially_frozen)

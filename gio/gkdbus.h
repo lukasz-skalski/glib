@@ -90,18 +90,18 @@ gboolean              _g_kdbus_is_closed                     (GKDBusWorker      
 
 /* ---------------------------------------------------------------------------------------------------- */
 
-GVariant *            _g_kdbus_Hello                                 (GKDBusWorker        *worker,
+const gchar *               _g_kdbus_Hello                           (GKDBusWorker        *worker,
                                                                       GError             **error);
 
-GVariant *            _g_kdbus_GetBusId                              (GKDBusWorker        *worker,
+gchar *                     _g_kdbus_GetBusId                        (GKDBusWorker        *worker,
                                                                       GError             **error);
 
-GVariant *            _g_kdbus_RequestName                           (GKDBusWorker        *worker,
+GBusRequestNameReplyFlags   _g_kdbus_RequestName                     (GKDBusWorker        *worker,
                                                                       const gchar         *name,
                                                                       GBusNameOwnerFlags   flags,
                                                                       GError             **error);
 
-GVariant *            _g_kdbus_ReleaseName                           (GKDBusWorker     *worker,
+GBusReleaseNameReplyFlags   _g_kdbus_ReleaseName                     (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       GError          **error);
 
