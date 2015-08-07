@@ -1858,12 +1858,12 @@ _g_dbus_get_list_internal (GDBusConnection    *connection,
   if (list_name_type == LIST_QUEUED_OWNERS)
     {
       if (connection->kdbus_worker)
-        result = _g_kdbus_GetListQueuedOwners (connection->kdbus_worker, name, error);
-      else
-        result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                              "org.freedesktop.DBus", "ListQueuedOwners",
-                                              g_variant_new ("(s)", name), G_VARIANT_TYPE ("(as)"),
-                                              G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+        return _g_kdbus_GetListQueuedOwners (connection->kdbus_worker, name, error);
+
+      result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                            "org.freedesktop.DBus", "ListQueuedOwners",
+                                            g_variant_new ("(s)", name), G_VARIANT_TYPE ("(as)"),
+                                            G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
     }
   else
     {

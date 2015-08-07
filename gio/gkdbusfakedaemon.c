@@ -305,7 +305,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           const gchar *unique_name;
 
           unique_name = _g_kdbus_Hello (worker, &local_error);
-          if (reply_body != NULL)
+          if (local_error == NULL)
             reply_body = g_variant_new ("(s)", unique_name);
         }
       else
@@ -316,20 +316,25 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         {
-          GVariantBuilder *builder;
           gchar **strv;
           gint cnt;
 
           cnt = 0;
-          builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
 
-          strv = _g_kdbus_GetListNames (worker, 1, &local_error);
-          while (strv[cnt])
-            g_variant_builder_add (builder, "s", strv[cnt++]);
+          strv = _g_kdbus_GetListNames (worker, TRUE, &local_error);
+          if (local_error == NULL)
+            {
+              GVariantBuilder *builder;
 
-          reply_body = g_variant_new ("(as)", builder);
+              builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
 
-          g_variant_builder_unref (builder);
+              while (strv[cnt])
+                g_variant_builder_add (builder, "s", strv[cnt++]);
+
+              reply_body = g_variant_new ("(as)", builder);
+
+              g_variant_builder_unref (builder);
+            }
           g_strfreev (strv);
         }
       else
@@ -340,20 +345,25 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
         {
-          GVariantBuilder *builder;
           gchar **strv;
           gint cnt;
 
           cnt = 0;
-          builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
 
-          strv = _g_kdbus_GetListNames (worker, 0, &local_error);
-          while (strv[cnt])
-            g_variant_builder_add (builder, "s", strv[cnt++]);
+          strv = _g_kdbus_GetListNames (worker, FALSE, &local_error);
+          if (local_error == NULL)
+            {
+              GVariantBuilder *builder;
 
-          reply_body = g_variant_new ("(as)", builder);
+              builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
 
-          g_variant_builder_unref (builder);
+              while (strv[cnt])
+                g_variant_builder_add (builder, "s", strv[cnt++]);
+
+              reply_body = g_variant_new ("(as)", builder);
+
+              g_variant_builder_unref (builder);
+            }
           g_strfreev (strv);
         }
       else
@@ -364,10 +374,28 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
+          gchar **strv;
           gchar *name;
+          gint cnt;
+
+          cnt = 0;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetListQueuedOwners (worker, name, &local_error);
+          strv = _g_kdbus_GetListQueuedOwners (worker, name, &local_error);
+          if (local_error == NULL)
+            {
+              GVariantBuilder *builder;
+
+              builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
+
+              while (strv[cnt])
+                g_variant_builder_add (builder, "s", strv[cnt++]);
+
+              reply_body = g_variant_new ("(as)", builder);
+
+              g_variant_builder_unref (builder);
+            }
+          g_strfreev (strv);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -377,10 +405,19 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
+          gboolean ret;
           gchar *name;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_NameHasOwner (worker, name, &local_error);
+
+          ret = _g_kdbus_NameHasOwner (worker, name, &local_error);
+          if (local_error == NULL)
+            {
+              if (ret)
+                reply_body = g_variant_new ("(b)", TRUE);
+              else
+                reply_body = g_variant_new ("(b)", FALSE);
+            }
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -396,7 +433,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           g_variant_get (body, "(&s)", &name);
 
           status = _g_kdbus_ReleaseName (worker, name, &local_error);
-          if (status != G_BUS_RELEASE_NAME_FLAGS_ERROR)
+          if (local_error == NULL)
             reply_body = g_variant_new ("(u)", status);
         }
       else
@@ -422,7 +459,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           g_variant_get (body, "(&su)", &name, &flags);
 
           status = _g_kdbus_RequestName (worker, name, flags, &local_error);
-          if (status != G_BUS_REQUEST_NAME_FLAGS_ERROR)
+          if (local_error == NULL)
             reply_body = g_variant_new ("(u)", status);
         }
       else

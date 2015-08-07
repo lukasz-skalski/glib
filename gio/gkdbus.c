@@ -970,20 +970,20 @@ _g_kdbus_GetBusId (GKDBusWorker  *worker,
 
 
 static void
-expand_listnames (gchar  ***strv_ptr,
-                  gchar    *name)
+expand_strv (gchar  ***strv_ptr,
+             gchar    *value)
 {
   gchar **strv;
   guint strv_len;
 
-  if (!name)
+  if (!value)
     return;
 
   strv = *strv_ptr;
   strv_len = g_strv_length (strv);
 
   strv = g_renew (gchar *, strv, strv_len + 2);
-  strv[strv_len] = name;
+  strv[strv_len] = value;
   strv[strv_len + 1] = NULL;
 
   *strv_ptr = strv;
@@ -993,10 +993,15 @@ expand_listnames (gchar  ***strv_ptr,
 /**
  * _g_kdbus_GetListNames:
  *
+ * Synchronously returns a list of:
+ *   - all currently-owned names on the bus (only_activatable = FALSE),
+ *   - all names that can be activated on the bus (only_activatable = TRUE),
+ *
+ * or NULL if error is set. Free with g_strfreev().
  */
 gchar **
 _g_kdbus_GetListNames (GKDBusWorker  *worker,
-                       guint          list_name_type,
+                       gboolean       only_activatable,
                        GError       **error)
 {
   struct kdbus_info *name_list, *name;
@@ -1008,10 +1013,9 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
   guint64 prev_id;
   gint ret;
 
-  listnames = g_new0 (gchar *, 1);
   prev_id = 0;
 
-  if (list_name_type)
+  if (only_activatable)
     cmd.flags = KDBUS_LIST_ACTIVATORS;                /* ListActivatableNames */
   else
     cmd.flags = KDBUS_LIST_UNIQUE | KDBUS_LIST_NAMES; /* ListNames */
@@ -1023,37 +1027,38 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_FAILED,
                    _("Error listing names"));
-      g_strfreev (listnames);
       return NULL;
     }
 
+  listnames = g_new0 (gchar *, 1);
   name_list = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd.offset);
 
-  KDBUS_FOREACH(name, name_list, cmd.list_size)
+  KDBUS_FOREACH (name, name_list, cmd.list_size)
     {
       struct kdbus_item *item;
-      const gchar *item_name = "";
 
       if ((cmd.flags & KDBUS_LIST_UNIQUE) && name->id != prev_id)
         {
           gchar *unique_name;
 
           asprintf (&unique_name, ":1.%llu", name->id);
-          expand_listnames (&listnames, unique_name);
+          expand_strv (&listnames, unique_name);
           prev_id = name->id;
         }
 
-       KDBUS_ITEM_FOREACH(item, name, items)
-         if (item->type == KDBUS_ITEM_OWNED_NAME)
-           item_name = item->name.name;
-
-        if (g_dbus_is_name (item_name))
-          expand_listnames (&listnames, g_strdup (item_name));
+       KDBUS_ITEM_FOREACH (item, name, items)
+         {
+           if (item->type == KDBUS_ITEM_OWNED_NAME)
+             {
+               if (g_dbus_is_name (item->name.name))
+                 expand_strv (&listnames, g_strdup (item->name.name));
+             }
+         }
     }
 
   /* org.freedesktop.DBus.ListNames */
-  if (list_name_type == 0)
-    expand_listnames (&listnames, g_strdup ("org.freedesktop.DBus"));
+  if (!only_activatable)
+    expand_strv (&listnames, g_strdup ("org.freedesktop.DBus"));
 
   g_kdbus_free_data (worker, cmd.offset);
 
@@ -1061,10 +1066,6 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
 }
 
 
-/**
- * _g_kdbus_NameHasOwner_internal:
- *
- */
 static gboolean
 g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
                                const gchar   *name,
@@ -1110,21 +1111,25 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
 /**
  * _g_kdbus_GetListQueuedOwners:
  *
+ * Synchronously returns the unique bus names of connections currently
+ * queued for the name.
+ *
+ * Returns: the unique bus names of connections currently queued for the
+ * 'name' or NULL if error is set. Free with g_strfreev().
  */
-GVariant *
+gchar **
 _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
                               const gchar   *name,
                               GError       **error)
 {
-  GVariant *result;
-  GVariantBuilder *builder;
-  gint ret;
-
   struct kdbus_info *name_list, *kname;
   struct kdbus_cmd_list cmd = {
     .size = sizeof(cmd),
     .flags = KDBUS_LIST_QUEUED
   };
+
+  gchar **queued_owners;
+  gint ret;
 
   if (!g_dbus_is_name (name))
     {
@@ -1154,83 +1159,78 @@ _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
       return NULL;
     }
 
+  queued_owners = g_new0 (gchar *, 1);
   name_list = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd.offset);
 
-  builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
   KDBUS_FOREACH(kname, name_list, cmd.list_size)
     {
       struct kdbus_item *item;
-      const char *item_name = "";
 
       KDBUS_ITEM_FOREACH(item, kname, items)
-        if (item->type == KDBUS_ITEM_NAME)
-          item_name = item->str;
+        {
+          if (item->type == KDBUS_ITEM_OWNED_NAME)
+            {
+              gchar *unique_name;
 
-      if (strcmp(item_name, name))
-        continue;
+              if (strcmp(item->name.name, name))
+                continue;
 
-      g_variant_builder_add (builder, "s", item_name);
+              if (asprintf (&unique_name, ":1.%llu", kname->id) != -1)
+                expand_strv (&queued_owners, unique_name);
+            }
+        }
     }
 
-  result = g_variant_new ("(as)", builder);
-  g_variant_builder_unref (builder);
-
   g_kdbus_free_data (worker, cmd.offset);
-  return result;
+
+  return queued_owners;
 }
 
 
 /**
  * _g_kdbus_NameHasOwner:
  *
+ * Checks if the specified name exists (currently has an owner).
+ *
+ * Returns: TRUE if the name exists and FALSE when name doesn't exists
+ * or error is set.
  */
-GVariant *
+gboolean
 _g_kdbus_NameHasOwner (GKDBusWorker  *worker,
                        const gchar   *name,
                        GError       **error)
 {
-  GVariant *result;
-
   if (!g_dbus_is_name (name))
     {
       g_set_error (error,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      return FALSE;
     }
 
   if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
-    return g_variant_new ("(b)", TRUE);
+    return  TRUE;
 
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
-    result = g_variant_new ("(b)", FALSE);
+    return FALSE;
   else
-    result = g_variant_new ("(b)", TRUE);
-
-  return result;
+    return TRUE;
 }
 
 
-/**
- * g_kdbus_GetConnInfo_internal:
- *
- */
 static GVariant *
 g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                               const gchar   *name,
                               guint64        flag,
                               GError       **error)
 {
-  GVariant *result;
-
+  GVariant *result = NULL;
   struct kdbus_cmd_info *cmd;
   struct kdbus_info *conn_info;
   struct kdbus_item *item;
   gssize size, len;
   gint ret;
-
-  result = NULL;
 
   if (!g_dbus_is_name (name))
     {

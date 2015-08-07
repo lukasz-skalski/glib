@@ -106,14 +106,14 @@ GBusReleaseNameReplyFlags   _g_kdbus_ReleaseName                     (GKDBusWork
                                                                       GError          **error);
 
 gchar **                    _g_kdbus_GetListNames                    (GKDBusWorker     *worker,
-                                                                      guint             flags,
+                                                                      gboolean          only_activatable,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_GetListQueuedOwners                   (GKDBusWorker     *worker,
+gchar **                    _g_kdbus_GetListQueuedOwners             (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_NameHasOwner                          (GKDBusWorker     *connection,
+gboolean                    _g_kdbus_NameHasOwner                    (GKDBusWorker     *connection,
                                                                       const gchar      *name,
                                                                       GError          **error);
 
