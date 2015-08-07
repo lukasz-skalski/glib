@@ -315,7 +315,23 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
   else if (!g_strcmp0 (member, "ListActivatableNames"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_GetListNames (worker, 1, &local_error);
+        {
+          GVariantBuilder *builder;
+          gchar **strv;
+          gint cnt;
+
+          cnt = 0;
+          builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
+
+          strv = _g_kdbus_GetListNames (worker, 1, &local_error);
+          while (strv[cnt])
+            g_variant_builder_add (builder, "s", strv[cnt++]);
+
+          reply_body = g_variant_new ("(as)", builder);
+
+          g_variant_builder_unref (builder);
+          g_strfreev (strv);
+        }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ListActivatableNames' has wrong args");
@@ -323,7 +339,23 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
   else if (!g_strcmp0 (member, "ListNames"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
-        reply_body = _g_kdbus_GetListNames (worker, 0, &local_error);
+        {
+          GVariantBuilder *builder;
+          gchar **strv;
+          gint cnt;
+
+          cnt = 0;
+          builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
+
+          strv = _g_kdbus_GetListNames (worker, 0, &local_error);
+          while (strv[cnt])
+            g_variant_builder_add (builder, "s", strv[cnt++]);
+
+          reply_body = g_variant_new ("(as)", builder);
+
+          g_variant_builder_unref (builder);
+          g_strfreev (strv);
+        }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ListNames' has wrong args");

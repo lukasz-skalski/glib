@@ -1875,12 +1875,12 @@ _g_dbus_get_list_internal (GDBusConnection    *connection,
         method_name = "ListActivatableNames";
 
       if (connection->kdbus_worker)
-        result = _g_kdbus_GetListNames (connection->kdbus_worker, list_name_type, error);
-      else
-        result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                              "org.freedesktop.DBus", method_name,
-                                              NULL, G_VARIANT_TYPE ("(as)"),
-                                              G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+        return _g_kdbus_GetListNames (connection->kdbus_worker, list_name_type, error);
+
+      result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                            "org.freedesktop.DBus", method_name,
+                                            NULL, G_VARIANT_TYPE ("(as)"),
+                                            G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
     }
 
   if (result != NULL)

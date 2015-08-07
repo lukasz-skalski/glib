@@ -105,7 +105,7 @@ GBusReleaseNameReplyFlags   _g_kdbus_ReleaseName                     (GKDBusWork
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_GetListNames                          (GKDBusWorker     *worker,
+gchar **                    _g_kdbus_GetListNames                    (GKDBusWorker     *worker,
                                                                       guint             flags,
                                                                       GError          **error);
 

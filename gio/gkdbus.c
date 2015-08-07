@@ -969,25 +969,46 @@ _g_kdbus_GetBusId (GKDBusWorker  *worker,
 }
 
 
+static void
+expand_listnames (gchar  ***strv_ptr,
+                  gchar    *name)
+{
+  gchar **strv;
+  guint strv_len;
+
+  if (!name)
+    return;
+
+  strv = *strv_ptr;
+  strv_len = g_strv_length (strv);
+
+  strv = g_renew (gchar *, strv, strv_len + 2);
+  strv[strv_len] = name;
+  strv[strv_len + 1] = NULL;
+
+  *strv_ptr = strv;
+}
+
+
 /**
  * _g_kdbus_GetListNames:
  *
  */
-GVariant *
+gchar **
 _g_kdbus_GetListNames (GKDBusWorker  *worker,
                        guint          list_name_type,
                        GError       **error)
 {
-  GVariant *result;
-  GVariantBuilder *builder;
   struct kdbus_info *name_list, *name;
   struct kdbus_cmd_list cmd = {
     .size = sizeof(cmd)
   };
 
+  gchar **listnames;
   guint64 prev_id;
   gint ret;
 
+  listnames = g_new0 (gchar *, 1);
   prev_id = 0;
 
   if (list_name_type)
@@ -1002,11 +1023,11 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_FAILED,
                    _("Error listing names"));
+      g_strfreev (listnames);
       return NULL;
     }
 
   name_list = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd.offset);
-  builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
 
   KDBUS_FOREACH(name, name_list, cmd.list_size)
     {
@@ -1015,12 +1036,10 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
 
       if ((cmd.flags & KDBUS_LIST_UNIQUE) && name->id != prev_id)
         {
-          GString *unique_name;
+          gchar *unique_name;
 
-          unique_name = g_string_new (NULL);
-          g_string_printf (unique_name, ":1.%llu", name->id);
-          g_variant_builder_add (builder, "s", unique_name->str);
-          g_string_free (unique_name,TRUE);
+          asprintf (&unique_name, ":1.%llu", name->id);
+          expand_listnames (&listnames, unique_name);
           prev_id = name->id;
         }
 
@@ -1029,18 +1048,16 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
            item_name = item->name.name;
 
         if (g_dbus_is_name (item_name))
-          g_variant_builder_add (builder, "s", item_name);
+          expand_listnames (&listnames, g_strdup (item_name));
     }
 
   /* org.freedesktop.DBus.ListNames */
   if (list_name_type == 0)
-    g_variant_builder_add (builder, "s", "org.freedesktop.DBus");
-
-  result = g_variant_new ("(as)", builder);
-  g_variant_builder_unref (builder);
+    expand_listnames (&listnames, g_strdup ("org.freedesktop.DBus"));
 
   g_kdbus_free_data (worker, cmd.offset);
-  return result;
+
+  return listnames;
 }
 
 
