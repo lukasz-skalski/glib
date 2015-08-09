@@ -124,14 +124,6 @@ struct dbus_fixed_header {
     v2 += v1; v1=ROTL(v1,17); v1 ^= v2; v2=ROTL(v2,32); \
   } while(0)
 
-typedef enum
-{
-  G_BUS_CREDS_PID              = 1,
-  G_BUS_CREDS_UID              = 2,
-  G_BUS_CREDS_UNIQUE_NAME      = 3,
-  G_BUS_CREDS_SELINUX_CONTEXT  = 4
-} GBusCredentialsFlags;
-
 typedef GObjectClass GKDBusWorkerClass;
 
 struct _GKDBusWorker
@@ -1218,19 +1210,36 @@ _g_kdbus_NameHasOwner (GKDBusWorker  *worker,
     return TRUE;
 }
 
+typedef enum {
+  G_DBUS_CREDS_NONE = 0,
+  G_DBUS_CREDS_PID = (1<<0),
+  G_DBUS_CREDS_UID = (1<<1),
+  G_DBUS_CREDS_UNIQUE_NAME = (1<<2),
+  G_DBUS_CREDS_SEC_LABEL = (1<<3)
+} GDBusCredentialsFlags;
 
-static GVariant *
+typedef struct
+{
+  guint   pid;
+  guint   uid;
+  gchar  *unique_name;
+  gchar  *sec_label;
+} GDBusCredentials;
+
+static GDBusCredentials *
 g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                               const gchar   *name,
-                              guint64        flag,
+                              guint          flags,
                               GError       **error)
 {
-  GVariant *result = NULL;
+  GDBusCredentials *creds;
   struct kdbus_cmd_info *cmd;
   struct kdbus_info *conn_info;
   struct kdbus_item *item;
   gssize size, len;
   gint ret;
+
+  creds = g_new (GDBusCredentials, 1);
 
   if (!g_dbus_is_name (name))
     {
@@ -1238,11 +1247,8 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      goto error;
     }
-
-  if (flag == G_BUS_CREDS_UNIQUE_NAME && g_strcmp0 (name, "org.freedesktop.DBus") == 0)
-    return g_variant_new ("(s)", name);
 
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
     {
@@ -1250,7 +1256,7 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_NAME_HAS_NO_OWNER,
                    "Could not get owner of name '%s': no such name", name);
-      return NULL;
+      goto error;
     }
 
   if (g_dbus_is_unique_name(name))
@@ -1279,20 +1285,15 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_FAILED,
                    _("Could not get connection info"));
-      return NULL;
+      goto error;
     }
 
   conn_info = (struct kdbus_info *) ((guint8 *) worker->kdbus_buffer + cmd->offset);
 
-  if (flag == G_BUS_CREDS_UNIQUE_NAME)
+  if (flags & G_DBUS_CREDS_UNIQUE_NAME)
     {
-       GString *unique_name;
-
-       unique_name = g_string_new (NULL);
-       g_string_printf (unique_name, ":1.%llu", (unsigned long long) conn_info->id);
-       result = g_variant_new ("(s)", unique_name->str);
-       g_string_free (unique_name,TRUE);
-       goto exit;
+       asprintf (&creds->unique_name, ":1.%llu", (unsigned long long) conn_info->id);
+       //TODO: Error handling
     }
 
   KDBUS_ITEM_FOREACH(item, conn_info, items)
@@ -1300,49 +1301,19 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
       switch (item->type)
         {
           case KDBUS_ITEM_PIDS:
-
-            if (flag == G_BUS_CREDS_PID)
-              {
-                guint pid = item->pids.pid;
-                result = g_variant_new ("(u)", pid);
-                goto exit;
-              }
-            break;
+            if (flags & G_DBUS_CREDS_PID)
+              creds->pid = item->pids.pid;
+          break;
 
           case KDBUS_ITEM_CREDS:
-
-            if (flag == G_BUS_CREDS_UID)
-              {
-                guint uid = item->creds.uid;
-                result = g_variant_new ("(u)", uid);
-                goto exit;
-              }
-            break;
+            if (flags & G_DBUS_CREDS_UID)
+              creds->uid = item->creds.uid;
+          break;
 
           case KDBUS_ITEM_SECLABEL:
-
-            if (flag == G_BUS_CREDS_SELINUX_CONTEXT)
-              {
-                GVariantBuilder builder;
-                gchar *label;
-                gint counter;
-
-                label = g_strdup (item->str);
-                if (!label)
-                  goto exit;
-
-                g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
-                for (counter = 0 ; counter < strlen (label) ; counter++)
-                  {
-                    g_variant_builder_add (&builder, "y", label);
-                    label++;
-                  }
-
-                result = g_variant_builder_end (&builder);
-                g_free (label);
-                goto exit;
-              }
-            break;
+            if (flags & G_DBUS_CREDS_SEC_LABEL)
+              creds->sec_label = g_strdup (item->str);
+          break;
 
           case KDBUS_ITEM_PID_COMM:
           case KDBUS_ITEM_TID_COMM:
@@ -1358,9 +1329,14 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
         }
    }
 
-exit:
   g_kdbus_free_data (worker, cmd->offset);
-  return result;
+  return creds;
+
+error:
+  g_free (creds->unique_name);
+  g_free (creds->sec_label);
+  g_free (creds);
+  return NULL;
 }
 
 
@@ -1368,15 +1344,25 @@ exit:
  * _g_kdbus_GetNameOwner:
  *
  */
-GVariant *
+gchar *
 _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
                        const gchar   *name,
                        GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_UNIQUE_NAME,
-                                       error);
+  GDBusCredentials *creds;
+  guint flags;
+
+  //TODO:
+  //if (flag == G_BUS_CREDS_UNIQUE_NAME && g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+  //  return g_variant_new ("(s)", name);
+
+  flags = G_DBUS_CREDS_UNIQUE_NAME;
+  creds = g_kdbus_GetConnInfo_internal (worker,
+                                        name,
+                                        flags,
+                                        error);
+  return creds->unique_name;
+  //free creds struct
 }
 
 
@@ -1389,10 +1375,14 @@ _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
                                      const gchar   *name,
                                      GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_PID,
-                                       error);
+  GDBusCredentials *creds;
+  guint flags;
+
+  flags = G_DBUS_CREDS_PID;
+  creds = g_kdbus_GetConnInfo_internal (worker,
+                                        name,
+                                        flags,
+                                        error);
 }
 
 
@@ -1405,10 +1395,14 @@ _g_kdbus_GetConnectionUnixUser (GKDBusWorker  *worker,
                                 const gchar   *name,
                                 GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_UID,
-                                       error);
+  GDBusCredentials *creds;
+  guint flags;
+
+  flags = G_DBUS_CREDS_UID;
+  creds = g_kdbus_GetConnInfo_internal (worker,
+                                        name,
+                                        flags,
+                                        error);
 }
 
 
@@ -1421,10 +1415,14 @@ _g_kdbus_GetConnectionSELinuxSecurityContext (GKDBusWorker  *worker,
                                               const gchar   *name,
                                               GError       **error)
 {
-  return g_kdbus_GetConnInfo_internal (worker,
-                                       name,
-                                       G_BUS_CREDS_SELINUX_CONTEXT,
-                                       error);
+  GDBusCredentials *creds;
+  guint flags;
+
+  flags = G_DBUS_CREDS_SEC_LABEL;
+  creds = g_kdbus_GetConnInfo_internal (worker,
+                                        name,
+                                        flags,
+                                        error);
 }
 
 
