@@ -1210,27 +1210,12 @@ _g_kdbus_NameHasOwner (GKDBusWorker  *worker,
     return TRUE;
 }
 
-typedef enum {
-  G_DBUS_CREDS_NONE = 0,
-  G_DBUS_CREDS_PID = (1<<0),
-  G_DBUS_CREDS_UID = (1<<1),
-  G_DBUS_CREDS_UNIQUE_NAME = (1<<2),
-  G_DBUS_CREDS_SEC_LABEL = (1<<3)
-} GDBusCredentialsFlags;
 
-typedef struct
-{
-  guint   pid;
-  guint   uid;
-  gchar  *unique_name;
-  gchar  *sec_label;
-} GDBusCredentials;
-
-static GDBusCredentials *
-g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
-                              const gchar   *name,
-                              guint          flags,
-                              GError       **error)
+GDBusCredentials *
+_g_kdbus_GetConnInfo (GKDBusWorker  *worker,
+                      const gchar   *name,
+                      guint          flags,
+                      GError       **error)
 {
   GDBusCredentials *creds;
   struct kdbus_cmd_info *cmd;
@@ -1239,7 +1224,7 @@ g_kdbus_GetConnInfo_internal (GKDBusWorker  *worker,
   gssize size, len;
   gint ret;
 
-  creds = g_new (GDBusCredentials, 1);
+  creds = g_new0 (GDBusCredentials, 1);
 
   if (!g_dbus_is_name (name))
     {
@@ -1360,10 +1345,10 @@ _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
     return g_strdup (name);
 
   flags = G_DBUS_CREDS_UNIQUE_NAME;
-  creds = g_kdbus_GetConnInfo_internal (worker,
-                                        name,
-                                        flags,
-                                        error);
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
   if (creds != NULL)
     {
       unique_name = creds->unique_name;
@@ -1391,10 +1376,10 @@ _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
   pid = -1;
 
   flags = G_DBUS_CREDS_PID;
-  creds = g_kdbus_GetConnInfo_internal (worker,
-                                        name,
-                                        flags,
-                                        error);
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
   if (creds != NULL)
     {
       pid = creds->pid;
@@ -1422,10 +1407,10 @@ _g_kdbus_GetConnectionUnixUser (GKDBusWorker  *worker,
   uid = -1;
 
   flags = G_DBUS_CREDS_UID;
-  creds = g_kdbus_GetConnInfo_internal (worker,
-                                        name,
-                                        flags,
-                                        error);
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
   if (creds != NULL)
     {
       uid = creds->uid;
@@ -1453,10 +1438,10 @@ _g_kdbus_GetConnectionSecurityLabel (GKDBusWorker  *worker,
   sec_label = NULL;
 
   flags = G_DBUS_CREDS_SEC_LABEL;
-  creds = g_kdbus_GetConnInfo_internal (worker,
-                                        name,
-                                        flags,
-                                        error);
+  creds = _g_kdbus_GetConnInfo (worker,
+                                name,
+                                flags,
+                                error);
   if (creds != NULL)
     {
       sec_label = creds->sec_label;
@@ -3295,24 +3280,24 @@ g_kdbus_worker_class_init (GKDBusWorkerClass *class)
 }
 
 static void
-g_kdbus_worker_init (GKDBusWorker *kdbus)
+g_kdbus_worker_init (GKDBusWorker *worker)
 {
-  kdbus->fd = -1;
+  worker->fd = -1;
 
-  kdbus->context = NULL;
-  kdbus->source = 0;
+  worker->context = NULL;
+  worker->source = 0;
 
-  kdbus->kdbus_buffer = NULL;
-  kdbus->unique_name = NULL;
-  kdbus->unique_id = -1;
+  worker->kdbus_buffer = NULL;
+  worker->unique_name = NULL;
+  worker->unique_id = -1;
 
-  kdbus->flags = KDBUS_HELLO_ACCEPT_FD;
-  kdbus->attach_flags_send = _KDBUS_ATTACH_ALL;
-  kdbus->attach_flags_recv = _KDBUS_ATTACH_ALL;
+  worker->flags = KDBUS_HELLO_ACCEPT_FD;
+  worker->attach_flags_send = _KDBUS_ATTACH_ALL;
+  worker->attach_flags_recv = _KDBUS_ATTACH_ALL;
 
-  kdbus->bloom_size = 0;
-  kdbus->bloom_n_hash = 0;
-  kdbus->matches = NULL;
+  worker->bloom_size = 0;
+  worker->bloom_n_hash = 0;
+  worker->matches = NULL;
 }
 
 GKDBusWorker *

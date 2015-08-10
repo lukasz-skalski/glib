@@ -193,44 +193,50 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
-          GVariantBuilder builder;
-          GVariant *variant;
-          GVariant *label;
-          guint32 uid, pid;
+          GDBusCredentials *creds;
           gchar *name;
+          guint flags;
+
+          creds = NULL;
+          flags = G_DBUS_CREDS_PID | G_DBUS_CREDS_UID | G_DBUS_CREDS_SEC_LABEL;
 
           g_variant_get (body, "(&s)", &name);
-          g_variant_builder_init (&builder, G_VARIANT_TYPE ("(a{sv})"));
-          g_variant_builder_open (&builder, G_VARIANT_TYPE ("a{sv}"));
 
-/*
-          variant = _g_kdbus_GetConnectionUnixUser (worker, name, NULL);
-          if (variant != NULL)
+          creds = _g_kdbus_GetConnInfo (worker,
+                                        name,
+                                        flags,
+                                        &local_error);
+          if (local_error == NULL)
             {
-              g_variant_get (variant, "(u)", &uid);
-              g_variant_builder_add (&builder, "{sv}", "UnixUserID", g_variant_new_uint32 (uid));
-              g_variant_unref (variant);
-            }
+              GVariantBuilder builder;
 
-          variant = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
-          if (variant != NULL)
-            {
-              g_variant_get (variant, "(u)", &pid);
-              g_variant_builder_add (&builder, "{sv}", "ProcessID", g_variant_new_uint32 (pid));
-              g_variant_unref (variant);
-            }
+              g_variant_builder_init (&builder, G_VARIANT_TYPE ("(a{sv})"));
+              g_variant_builder_open (&builder, G_VARIANT_TYPE ("a{sv}"));
 
-          label = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &local_error);
-          if (label != NULL)
-            g_variant_builder_add (&builder, "{sv}", "LinuxSecurityLabel", label);
-*/
-          g_variant_builder_close (&builder);
-          reply_body = g_variant_builder_end (&builder);
+              g_variant_builder_add (&builder, "{sv}", "UnixUserID", g_variant_new_uint32 (creds->uid));
+              g_variant_builder_add (&builder, "{sv}", "ProcessID", g_variant_new_uint32 (creds->pid));
 
-          if (local_error != NULL)
-            {
-              g_variant_unref (reply_body);
-              reply_body = NULL;
+              if (creds->sec_label != NULL)
+                {
+                  GVariantBuilder *label_builder;
+                  gint counter;
+
+                  label_builder = g_variant_builder_new (G_VARIANT_TYPE ("ay"));
+                  for (counter = 0 ; counter < strlen (creds->sec_label) ; counter++)
+                    {
+                      g_variant_builder_add (label_builder, "y", creds->sec_label);
+                      creds->sec_label++;
+                    }
+                  g_variant_builder_add (&builder, "{sv}", "LinuxSecurityLabel", g_variant_new ("(ay)", label_builder));
+
+                  g_variant_builder_unref (label_builder);
+                  g_free (creds->sec_label);
+                }
+
+              g_free (creds);
+              g_variant_builder_close (&builder);
+
+              reply_body = g_variant_builder_end (&builder);
             }
         }
       else
@@ -323,6 +329,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           gchar *name;
 
           g_variant_get (body, "(&s)", &name);
+
           unique_name = _g_kdbus_GetNameOwner (worker, name, &local_error);
           if (local_error == NULL)
             reply_body = g_variant_new ("(s)", unique_name);

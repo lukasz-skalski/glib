@@ -42,6 +42,21 @@
                                                             G_TYPE_KDBUS_WORKER))
 #define G_KDBUS_WORKER_GET_CLASS(inst)                     (G_TYPE_INSTANCE_GET_CLASS ((inst),                      \
                                                             G_TYPE_KDBUS_WORKER, GKDBusWorkerClass))
+typedef enum {
+  G_DBUS_CREDS_NONE = 0,
+  G_DBUS_CREDS_PID = (1<<0),
+  G_DBUS_CREDS_UID = (1<<1),
+  G_DBUS_CREDS_UNIQUE_NAME = (1<<2),
+  G_DBUS_CREDS_SEC_LABEL = (1<<3)
+} GDBusCredentialsFlags;
+
+typedef struct
+{
+  guint   pid;
+  guint   uid;
+  gchar  *unique_name;
+  gchar  *sec_label;
+} GDBusCredentials;
 
 typedef struct _GKDBusWorker                                  GKDBusWorker;
 
@@ -80,13 +95,13 @@ void                  _g_kdbus_worker_close                  (GKDBusWorker      
 
 /* ---------------------------------------------------------------------------------------------------- */
 
-gboolean              _g_kdbus_open                          (GKDBusWorker        *kdbus,
+gboolean              _g_kdbus_open                          (GKDBusWorker        *worker,
                                                               const gchar         *address,
                                                               GError             **error);
 
-gboolean              _g_kdbus_close                         (GKDBusWorker        *kdbus);
+gboolean              _g_kdbus_close                         (GKDBusWorker        *worker);
 
-gboolean              _g_kdbus_is_closed                     (GKDBusWorker        *kdbus);
+gboolean              _g_kdbus_is_closed                     (GKDBusWorker        *worker);
 
 /* ---------------------------------------------------------------------------------------------------- */
 
@@ -144,6 +159,11 @@ gboolean                    _g_kdbus_AddMatch                        (GKDBusWork
 
 gboolean                    _g_kdbus_RemoveMatch                     (GKDBusWorker     *worker,
                                                                       const gchar      *match_rule,
+                                                                      GError          **error);
+
+GDBusCredentials *          _g_kdbus_GetConnInfo                     (GKDBusWorker     *worker,
+                                                                      const gchar      *name,
+                                                                      guint             flags,
                                                                       GError          **error);
 
 /* ---------------------------------------------------------------------------------------------------- */
