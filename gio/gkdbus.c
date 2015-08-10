@@ -1409,39 +1409,61 @@ _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
  * _g_kdbus_GetConnectionUnixUser:
  *
  */
-GVariant *
+uid_t
 _g_kdbus_GetConnectionUnixUser (GKDBusWorker  *worker,
                                 const gchar   *name,
                                 GError       **error)
 {
   GDBusCredentials *creds;
   guint flags;
+  uid_t uid;
+
+  creds = NULL;
+  uid = -1;
 
   flags = G_DBUS_CREDS_UID;
   creds = g_kdbus_GetConnInfo_internal (worker,
                                         name,
                                         flags,
                                         error);
+  if (creds != NULL)
+    {
+      uid = creds->uid;
+      g_free (creds);
+    }
+
+  return uid;
 }
 
 
 /**
- * _g_kdbus_GetConnectionSELinuxSecurityContext:
+ * _g_kdbus_GetConnectionSecurityLabel:
  *
  */
-GVariant *
-_g_kdbus_GetConnectionSELinuxSecurityContext (GKDBusWorker  *worker,
-                                              const gchar   *name,
-                                              GError       **error)
+gchar *
+_g_kdbus_GetConnectionSecurityLabel (GKDBusWorker  *worker,
+                                     const gchar   *name,
+                                     GError       **error)
 {
   GDBusCredentials *creds;
+  gchar *sec_label;
   guint flags;
+
+  creds = NULL;
+  sec_label = NULL;
 
   flags = G_DBUS_CREDS_SEC_LABEL;
   creds = g_kdbus_GetConnInfo_internal (worker,
                                         name,
                                         flags,
                                         error);
+  if (creds != NULL)
+    {
+      sec_label = creds->sec_label;
+      g_free (creds);
+    }
+
+  return sec_label;
 }
 
 

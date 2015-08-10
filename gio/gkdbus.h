@@ -125,11 +125,11 @@ pid_t                       _g_kdbus_GetConnectionUnixProcessID      (GKDBusWork
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_GetConnectionUnixUser                 (GKDBusWorker     *worker,
+uid_t                       _g_kdbus_GetConnectionUnixUser           (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_GetConnectionSELinuxSecurityContext   (GKDBusWorker     *worker,
+gchar *                     _g_kdbus_GetConnectionSecurityLabel      (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       GError          **error);
 

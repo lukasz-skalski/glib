@@ -25,6 +25,7 @@
 #include "gkdbusfakedaemon.h"
 
 #include <gio/gio.h>
+#include <string.h>
 
 static gchar *introspect =
   "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
@@ -196,6 +197,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           g_variant_builder_init (&builder, G_VARIANT_TYPE ("(a{sv})"));
           g_variant_builder_open (&builder, G_VARIANT_TYPE ("a{sv}"));
 
+/*
           variant = _g_kdbus_GetConnectionUnixUser (worker, name, NULL);
           if (variant != NULL)
             {
@@ -204,7 +206,6 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
               g_variant_unref (variant);
             }
 
-/*
           variant = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
           if (variant != NULL)
             {
@@ -212,12 +213,11 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
               g_variant_builder_add (&builder, "{sv}", "ProcessID", g_variant_new_uint32 (pid));
               g_variant_unref (variant);
             }
-*/
 
           label = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &local_error);
           if (label != NULL)
             g_variant_builder_add (&builder, "{sv}", "LinuxSecurityLabel", label);
-
+*/
           g_variant_builder_close (&builder);
           reply_body = g_variant_builder_end (&builder);
 
@@ -236,11 +236,27 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
+          gchar *label;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &local_error);
-          if (reply_body == NULL && local_error == NULL)
+
+          label = _g_kdbus_GetConnectionSecurityLabel (worker, name, &local_error);
+          if (label == NULL && local_error == NULL)
             g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED, "Operation not supported");
+          else if (local_error == NULL)
+            {
+              GVariantBuilder builder;
+              gint counter;
+
+              g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
+              for (counter = 0 ; counter < strlen (label) ; counter++)
+                {
+                  g_variant_builder_add (&builder, "y", label);
+                  label++;
+                }
+                reply_body = g_variant_builder_end (&builder);
+                g_free (label);
+            }
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -267,9 +283,12 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
+          uid_t uid;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetConnectionUnixUser (worker, name, &local_error);
+          uid = _g_kdbus_GetConnectionUnixUser (worker, name, &local_error);
+          if (local_error == NULL)
+            reply_body = g_variant_new ("(u)", uid);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,

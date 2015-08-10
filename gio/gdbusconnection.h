@@ -131,7 +131,7 @@ pid_t                        _g_dbus_get_connection_pid           (GDBusConnecti
                                                                    const gchar         *name,
                                                                    GError             **error);
 
-guint32                      _g_dbus_get_connection_uid           (GDBusConnection     *connection,
+uid_t                        _g_dbus_get_connection_uid           (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
 

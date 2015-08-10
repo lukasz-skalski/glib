@@ -2087,11 +2087,10 @@ _g_dbus_get_connection_pid (GDBusConnection  *connection,
   if (connection->kdbus_worker)
     return _g_kdbus_GetConnectionUnixProcessID (connection->kdbus_worker, name, error);
 
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                          "org.freedesktop.DBus", "GetConnectionUnixProcessID",
-                                          g_variant_new ("(s)", name), G_VARIANT_TYPE ("(u)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                        "org.freedesktop.DBus", "GetConnectionUnixProcessID",
+                                        g_variant_new ("(s)", name), G_VARIANT_TYPE ("(u)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(u)", &pid);
@@ -2121,13 +2120,13 @@ _g_dbus_get_connection_pid (GDBusConnection  *connection,
  *
  * Since: 2.4x
  */
-guint32
+uid_t
 _g_dbus_get_connection_uid (GDBusConnection  *connection,
                             const gchar      *name,
                             GError          **error)
 {
   GVariant *result;
-  guint32 uid;
+  uid_t uid;
 
   g_return_val_if_fail (G_IS_DBUS_CONNECTION (connection), -1);
   g_return_val_if_fail (name == NULL || g_dbus_is_name (name), -1);
@@ -2137,12 +2136,12 @@ _g_dbus_get_connection_uid (GDBusConnection  *connection,
   uid = -1;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_GetConnectionUnixUser (connection->kdbus_worker, name, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                          "org.freedesktop.DBus", "GetConnectionUnixUser",
-                                          g_variant_new ("(s)", name), G_VARIANT_TYPE ("(u)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_GetConnectionUnixUser (connection->kdbus_worker, name, error);
+
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                        "org.freedesktop.DBus", "GetConnectionUnixUser",
+                                        g_variant_new ("(s)", name), G_VARIANT_TYPE ("(u)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(u)", &uid);
