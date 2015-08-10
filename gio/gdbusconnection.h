@@ -93,12 +93,12 @@ GDBusConnection *g_dbus_connection_new_for_address_sync       (const gchar      
 
 gboolean                     _g_dbus_connection_is_kdbus          (GDBusConnection     *connection);
 
-guint32                      _g_dbus_request_name                 (GDBusConnection     *connection,
+GBusRequestNameReplyFlags    _g_dbus_request_name                 (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GBusNameOwnerFlags   flags,
                                                                    GError             **error);
 
-guint32                      _g_dbus_release_name                 (GDBusConnection     *connection,
+GBusReleaseNameReplyFlags    _g_dbus_release_name                 (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
 

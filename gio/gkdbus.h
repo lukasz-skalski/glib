@@ -133,24 +133,16 @@ gchar *                     _g_kdbus_GetConnectionSecurityLabel      (GKDBusWork
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_StartServiceByName                    (GKDBusWorker     *worker,
+GBusStartServiceReplyFlags  _g_kdbus_StartServiceByName              (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       guint32           flags,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_AddMatch                              (GKDBusWorker     *worker,
+gboolean                    _g_kdbus_AddMatch                        (GKDBusWorker     *worker,
                                                                       const gchar      *match_rule,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_RemoveMatch                           (GKDBusWorker     *worker,
-                                                                      const gchar      *match_rule,
-                                                                      GError          **error);
-
-gboolean              _g_kdbus_AddMatch_internal                     (GKDBusWorker     *worker,
-                                                                      const gchar      *match_rule,
-                                                                      GError          **error);
-
-gboolean              _g_kdbus_RemoveMatch_internal                  (GKDBusWorker     *worker,
+gboolean                    _g_kdbus_RemoveMatch                     (GKDBusWorker     *worker,
                                                                       const gchar      *match_rule,
                                                                       GError          **error);
 

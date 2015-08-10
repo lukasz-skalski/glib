@@ -1471,13 +1471,13 @@ _g_kdbus_GetConnectionSecurityLabel (GKDBusWorker  *worker,
  * _g_kdbus_StartServiceByName:
  *
  */
-GVariant *
+GBusStartServiceReplyFlags
 _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
                              const gchar   *name,
                              guint32        flags,
                              GError       **error)
 {
-  guint32 status;
+  GBusStartServiceReplyFlags status;
 
   if (!g_dbus_is_name (name))
     {
@@ -1485,11 +1485,11 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
                    G_DBUS_ERROR,
                    G_DBUS_ERROR_INVALID_ARGS,
                    "Given bus name \"%s\" is not valid", name);
-      return NULL;
+      return G_BUS_START_SERVICE_REPLY_ERROR;
     }
 
   if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
-    return g_variant_new ("(u)", G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING);
+    return G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING;
 
   if (!g_kdbus_NameHasOwner_internal (worker, name, error))
     {
@@ -1509,7 +1509,7 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
                        G_DBUS_ERROR,
                        G_DBUS_ERROR_SERVICE_UNKNOWN,
                        "The name %s was not provided by any .service files", name);
-          return NULL;
+          return G_BUS_START_SERVICE_REPLY_ERROR;
         }
       g_object_unref (reply);
       status = G_BUS_START_SERVICE_REPLY_SUCCESS;
@@ -1517,7 +1517,7 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
   else
     status = G_BUS_START_SERVICE_REPLY_ALREADY_RUNNING;
 
-  return g_variant_new ("(u)", status);
+  return status;
 }
 
 
@@ -1625,42 +1625,10 @@ g_kdbus_bloom_add_prefixes (GKDBusWorker  *worker,
  * _g_kdbus_AddMatch:
  *
  */
-GVariant *
+gboolean
 _g_kdbus_AddMatch (GKDBusWorker  *worker,
                    const gchar   *match_rule,
                    GError       **error)
-{
-  if (_g_kdbus_AddMatch_internal (worker, match_rule, error))
-    return g_variant_new ("()", NULL);
-  else
-    return NULL;
-}
-
-
-/**
- * _g_kdbus_RemoveMatch:
- *
- */
-GVariant *
-_g_kdbus_RemoveMatch (GKDBusWorker  *worker,
-                      const gchar   *match_rule,
-                      GError       **error)
-{
-  if (_g_kdbus_RemoveMatch_internal (worker, match_rule, error))
-    return g_variant_new ("()", NULL);
-  else
-    return NULL;
-}
-
-
-/**
- * _g_kdbus_AddMatch_internal:
- *
- */
-gboolean
-_g_kdbus_AddMatch_internal (GKDBusWorker  *worker,
-                            const gchar   *match_rule,
-                            GError       **error)
 {
   Match *match;
   MatchElement *element;
@@ -1812,13 +1780,13 @@ _g_kdbus_AddMatch_internal (GKDBusWorker  *worker,
 
 
 /**
- * _g_kdbus_RemoveMatch_internal:
+ * _g_kdbus_RemoveMatch:
  *
  */
 gboolean
-_g_kdbus_RemoveMatch_internal (GKDBusWorker  *worker,
-                               const gchar   *match_rule,
-                               GError       **error)
+_g_kdbus_RemoveMatch (GKDBusWorker  *worker,
+                      const gchar   *match_rule,
+                      GError       **error)
 {
   Match *match, *other_match;
   GList *matches;
@@ -2977,10 +2945,15 @@ _g_kdbus_send (GKDBusWorker  *worker,
   dst_name = g_dbus_message_get_destination (message);
   if (dst_name != NULL)
     {
-      if (!g_strcmp0 (dst_name, "org.freedesktop.DBus"))
+      if (0)
+        {
+        }
+#ifdef DBUS_DAEMON_EMULATION
+      else if (!g_strcmp0 (dst_name, "org.freedesktop.DBus"))
         {
           msg->dst_id = worker->unique_id;
         }
+#endif
       else if (g_dbus_is_unique_name (dst_name))
         {
           if (dst_name[1] != '1' || dst_name[2] != '.')

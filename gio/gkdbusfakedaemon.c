@@ -164,7 +164,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           gchar *rule;
 
           g_variant_get (body, "(&s)", &rule);
-          reply_body = _g_kdbus_AddMatch (worker, rule, &local_error);
+
+          _g_kdbus_AddMatch (worker, rule, &local_error);
+          if (local_error == NULL)
+            reply_body = g_variant_new ("()", NULL);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -177,7 +180,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
           gchar *rule;
 
           g_variant_get (body, "(&s)", &rule);
-          reply_body = _g_kdbus_RemoveMatch (worker, rule, &local_error);
+
+          _g_kdbus_RemoveMatch (worker, rule, &local_error);
+          if (local_error == NULL)
+            reply_body = g_variant_new ("()", NULL);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -498,11 +504,15 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
         {
+          GBusStartServiceReplyFlags status;
           gchar *name;
           guint32 flags;
 
           g_variant_get (body, "(&su)", &name, &flags);
-          reply_body = _g_kdbus_StartServiceByName (worker, name, flags, &local_error);
+
+          status = _g_kdbus_StartServiceByName (worker, name, flags, &local_error);
+          if (local_error == NULL)
+            reply_body = g_variant_new ("(u)", status);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,

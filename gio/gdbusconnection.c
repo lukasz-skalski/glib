@@ -1738,12 +1738,12 @@ _g_dbus_add_match (GDBusConnection  *connection,
     return ret;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_AddMatch (connection->kdbus_worker, match_rule, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                          "org.freedesktop.DBus", "AddMatch",
-                                          g_variant_new ("(s)", match_rule), NULL,
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_AddMatch (connection->kdbus_worker, match_rule, error);
+
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                        "org.freedesktop.DBus", "AddMatch",
+                                        g_variant_new ("(s)", match_rule), NULL,
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       ret = TRUE;
@@ -1775,12 +1775,12 @@ _g_dbus_remove_match (GDBusConnection  *connection,
     return ret;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_RemoveMatch (connection->kdbus_worker, match_rule, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                          "org.freedesktop.DBus", "RemoveMatch",
-                                          g_variant_new ("(s)", match_rule), NULL,
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_RemoveMatch (connection->kdbus_worker, match_rule, error);
+
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                        "org.freedesktop.DBus", "RemoveMatch",
+                                        g_variant_new ("(s)", match_rule), NULL,
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       ret = TRUE;
@@ -2173,12 +2173,12 @@ _g_dbus_start_service_by_name (GDBusConnection  *connection,
   ret = G_BUS_START_SERVICE_REPLY_ERROR;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_StartServiceByName (connection->kdbus_worker, name, flags, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                          "org.freedesktop.DBus", "StartServiceByName",
-                                          g_variant_new ("(su)", name, flags), G_VARIANT_TYPE ("(u)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_StartServiceByName (connection->kdbus_worker, name, flags, error);
+
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                        "org.freedesktop.DBus", "StartServiceByName",
+                                        g_variant_new ("(su)", name, flags), G_VARIANT_TYPE ("(u)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(u)", &ret);
@@ -4272,7 +4272,7 @@ g_dbus_connection_signal_subscribe (GDBusConnection     *connection,
                 _g_kdbus_subscribe_name_owner_changed (connection->kdbus_worker, signal_data->rule, arg0, NULL);
             }
           else
-            _g_kdbus_AddMatch_internal (connection->kdbus_worker, signal_data->rule, NULL);
+            _g_kdbus_AddMatch (connection->kdbus_worker, signal_data->rule, NULL);
         }
       else
         {
@@ -4363,7 +4363,7 @@ unsubscribe_id_internal (GDBusConnection *connection,
                * did, and releasing the lock later.
                */
               if (connection->kdbus_worker)
-                _g_kdbus_RemoveMatch_internal (connection->kdbus_worker, signal_data->rule, NULL);
+                _g_kdbus_RemoveMatch (connection->kdbus_worker, signal_data->rule, NULL);
               else
                 if (!is_signal_data_for_name_lost_or_acquired (signal_data))
                   remove_match_rule (connection, signal_data->rule);
