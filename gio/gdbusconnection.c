@@ -2032,12 +2032,12 @@ _g_dbus_get_name_owner (GDBusConnection  *connection,
   result = NULL;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_GetNameOwner (connection->kdbus_worker, name, error);
-  else
-    result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
-                                          "org.freedesktop.DBus", "GetNameOwner",
-                                          g_variant_new ("(s)", name), G_VARIANT_TYPE ("(s)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
+    return _g_kdbus_GetNameOwner (connection->kdbus_worker, name, error);
+
+  result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
+                                        "org.freedesktop.DBus", "GetNameOwner",
+                                        g_variant_new ("(s)", name), G_VARIANT_TYPE ("(s)"),
+                                        G_DBUS_CALL_FLAGS_NONE, -1, NULL, error);
   if (result != NULL)
     {
       g_variant_get (result, "(s)", &name_owner);
@@ -2069,13 +2069,13 @@ _g_dbus_get_name_owner (GDBusConnection  *connection,
  *
  * Since: 2.4x
  */
-guint32
+pid_t
 _g_dbus_get_connection_pid (GDBusConnection  *connection,
                             const gchar      *name,
                             GError          **error)
 {
   GVariant *result;
-  guint32 pid;
+  pid_t pid;
 
   g_return_val_if_fail (G_IS_DBUS_CONNECTION (connection), -1);
   g_return_val_if_fail (name == NULL || g_dbus_is_name (name), -1);
@@ -2085,7 +2085,8 @@ _g_dbus_get_connection_pid (GDBusConnection  *connection,
   pid = -1;
 
   if (connection->kdbus_worker)
-    result = _g_kdbus_GetConnectionUnixProcessID (connection->kdbus_worker, name, error);
+    return _g_kdbus_GetConnectionUnixProcessID (connection->kdbus_worker, name, error);
+
   else
     result = g_dbus_connection_call_sync (connection, "org.freedesktop.DBus", "/",
                                           "org.freedesktop.DBus", "GetConnectionUnixProcessID",

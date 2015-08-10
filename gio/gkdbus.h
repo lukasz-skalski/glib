@@ -106,7 +106,7 @@ GBusReleaseNameReplyFlags   _g_kdbus_ReleaseName                     (GKDBusWork
                                                                       GError          **error);
 
 gchar **                    _g_kdbus_GetListNames                    (GKDBusWorker     *worker,
-                                                                      gboolean          only_activatable,
+                                                                      gboolean          activatable,
                                                                       GError          **error);
 
 gchar **                    _g_kdbus_GetListQueuedOwners             (GKDBusWorker     *worker,
@@ -117,11 +117,11 @@ gboolean                    _g_kdbus_NameHasOwner                    (GKDBusWork
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_GetNameOwner                          (GKDBusWorker     *worker,
+gchar *                     _g_kdbus_GetNameOwner                    (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       GError          **error);
 
-GVariant *            _g_kdbus_GetConnectionUnixProcessID            (GKDBusWorker     *worker,
+pid_t                       _g_kdbus_GetConnectionUnixProcessID      (GKDBusWorker     *worker,
                                                                       const gchar      *name,
                                                                       GError          **error);
 

@@ -127,7 +127,7 @@ gchar                       *_g_dbus_get_name_owner               (GDBusConnecti
                                                                    const gchar         *name,
                                                                    GError             **error);
 
-guint32                      _g_dbus_get_connection_pid           (GDBusConnection     *connection,
+pid_t                        _g_dbus_get_connection_pid           (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
 

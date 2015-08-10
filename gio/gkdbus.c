@@ -986,14 +986,14 @@ expand_strv (gchar  ***strv_ptr,
  * _g_kdbus_GetListNames:
  *
  * Synchronously returns a list of:
- *   - all currently-owned names on the bus (only_activatable = FALSE),
- *   - all names that can be activated on the bus (only_activatable = TRUE),
+ *   - all currently-owned names on the bus (activatable = FALSE),
+ *   - all names that can be activated on the bus (activatable = TRUE),
  *
  * or NULL if error is set. Free with g_strfreev().
  */
 gchar **
 _g_kdbus_GetListNames (GKDBusWorker  *worker,
-                       gboolean       only_activatable,
+                       gboolean       activatable,
                        GError       **error)
 {
   struct kdbus_info *name_list, *name;
@@ -1007,7 +1007,7 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
 
   prev_id = 0;
 
-  if (only_activatable)
+  if (activatable)
     cmd.flags = KDBUS_LIST_ACTIVATORS;                /* ListActivatableNames */
   else
     cmd.flags = KDBUS_LIST_UNIQUE | KDBUS_LIST_NAMES; /* ListNames */
@@ -1049,7 +1049,7 @@ _g_kdbus_GetListNames (GKDBusWorker  *worker,
     }
 
   /* org.freedesktop.DBus.ListNames */
-  if (!only_activatable)
+  if (!activatable)
     expand_strv (&listnames, g_strdup ("org.freedesktop.DBus"));
 
   g_kdbus_free_data (worker, cmd.offset);
@@ -1350,19 +1350,27 @@ _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
                        GError       **error)
 {
   GDBusCredentials *creds;
+  gchar *unique_name;
   guint flags;
 
-  //TODO:
-  //if (flag == G_BUS_CREDS_UNIQUE_NAME && g_strcmp0 (name, "org.freedesktop.DBus") == 0)
-  //  return g_variant_new ("(s)", name);
+  creds = NULL;
+  unique_name = NULL;
+
+  if (g_strcmp0 (name, "org.freedesktop.DBus") == 0)
+    return g_strdup (name);
 
   flags = G_DBUS_CREDS_UNIQUE_NAME;
   creds = g_kdbus_GetConnInfo_internal (worker,
                                         name,
                                         flags,
                                         error);
-  return creds->unique_name;
-  //free creds struct
+  if (creds != NULL)
+    {
+      unique_name = creds->unique_name;
+      g_free (creds);
+    }
+
+  return unique_name;
 }
 
 
@@ -1370,19 +1378,30 @@ _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
  * _g_kdbus_GetConnectionUnixProcessID:
  *
  */
-GVariant *
+pid_t
 _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
                                      const gchar   *name,
                                      GError       **error)
 {
   GDBusCredentials *creds;
   guint flags;
+  pid_t pid;
+
+  creds = NULL;
+  pid = -1;
 
   flags = G_DBUS_CREDS_PID;
   creds = g_kdbus_GetConnInfo_internal (worker,
                                         name,
                                         flags,
                                         error);
+  if (creds != NULL)
+    {
+      pid = creds->pid;
+      g_free (creds);
+    }
+
+  return pid;
 }
 
 

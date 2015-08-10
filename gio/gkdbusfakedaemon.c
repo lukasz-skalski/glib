@@ -204,6 +204,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
               g_variant_unref (variant);
             }
 
+/*
           variant = _g_kdbus_GetConnectionUnixProcessID (worker, name, NULL);
           if (variant != NULL)
             {
@@ -211,6 +212,7 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
               g_variant_builder_add (&builder, "{sv}", "ProcessID", g_variant_new_uint32 (pid));
               g_variant_unref (variant);
             }
+*/
 
           label = _g_kdbus_GetConnectionSELinuxSecurityContext (worker, name, &local_error);
           if (label != NULL)
@@ -249,9 +251,12 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
           gchar *name;
+          pid_t pid;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetConnectionUnixProcessID (worker, name, &local_error);
+          pid = _g_kdbus_GetConnectionUnixProcessID (worker, name, &local_error);
+          if (local_error == NULL)
+            reply_body = g_variant_new ("(u)", pid);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -289,10 +294,14 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
         {
+          gchar *unique_name;
           gchar *name;
 
           g_variant_get (body, "(&s)", &name);
-          reply_body = _g_kdbus_GetNameOwner (worker, name, &local_error);
+          unique_name = _g_kdbus_GetNameOwner (worker, name, &local_error);
+          if (local_error == NULL)
+            reply_body = g_variant_new ("(s)", unique_name);
+          g_free (unique_name);
         }
       else
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
