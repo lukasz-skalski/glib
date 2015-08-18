@@ -948,14 +948,17 @@ typedef enum
 /**
  * GBusRequestNameReplyFlags:
  * @G_BUS_REQUEST_NAME_FLAGS_ERROR: Error flag.
- * @G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER: Caller is now the primary owner of the name, replacing any previous owner.
- * @G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE: The name already had an owner, the application will be placed in a queue.
+ * @G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER: Caller is now the primary owner of the name, replacing
+ * any previous owner.
+ * @G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE: The name already had an owner, the application will be
+ * placed in a queue.
  * @G_BUS_REQUEST_NAME_FLAGS_EXISTS: The name already has an owner.
- * @G_BUS_REQUEST_NAME_FLAGS_ALREADY_OWNER: The application trying to request ownership of a name is already the owner of it.
+ * @G_BUS_REQUEST_NAME_FLAGS_ALREADY_OWNER: The application trying to request ownership of a name
+ * is already the owner of it.
  *
  * Flags used in g_dbus_request_name().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 typedef enum
 {
@@ -975,7 +978,7 @@ typedef enum
  *
  * Flags used in g_dbus_release_name().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 typedef enum
 {
@@ -993,7 +996,7 @@ typedef enum
  *
  * Flags used in g_dbus_start_service_by_name().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 typedef enum
 {

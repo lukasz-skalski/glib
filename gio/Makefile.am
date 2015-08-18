@@ -84,8 +84,6 @@ gdbus_sources = 							\
 	gdbusobjectmanager.h		gdbusobjectmanager.c		\
 	gdbusobjectmanagerclient.h	gdbusobjectmanagerclient.c	\
 	gdbusobjectmanagerserver.h	gdbusobjectmanagerserver.c	\
-	gkdbus.h			gkdbus.c			\
-	gkdbusfakedaemon.h		gkdbusfakedaemon.c		\
 	gtestdbus.h			gtestdbus.c			\
 	$(NULL)
 
@@ -256,6 +254,10 @@ platform_libadd += xdgmime/libxdgmime.la
 platform_deps += xdgmime/libxdgmime.la
 unix_sources = \
 	gfiledescriptorbased.c  \
+	gkdbus.c		\
+	gkdbus.h		\
+	gkdbusfakedaemon.c	\
+	gkdbusfakedaemon.h	\
 	gunixconnection.c	\
 	gunixcredentialsmessage.c	\
 	gunixfdlist.c		\

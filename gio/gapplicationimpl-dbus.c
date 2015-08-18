@@ -346,7 +346,7 @@ g_application_impl_attempt_primary (GApplicationImpl  *impl,
     NULL /* set_property */
   };
   GApplicationClass *app_class = G_APPLICATION_GET_CLASS (impl->app);
-  guint32 rval;
+  GBusRequestNameReplyFlags rval;
 
   if (org_gtk_Application == NULL)
     {
@@ -430,7 +430,7 @@ g_application_impl_attempt_primary (GApplicationImpl  *impl,
     return FALSE;
 
   /* DBUS_REQUEST_NAME_REPLY_EXISTS: 3 */
-  impl->primary = (rval != 3);
+  impl->primary = (rval != G_BUS_REQUEST_NAME_FLAGS_EXISTS);
 
   return TRUE;
 }

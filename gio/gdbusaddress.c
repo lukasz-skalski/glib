@@ -39,9 +39,9 @@
 #include "gdbusprivate.h"
 #include "giomodule-priv.h"
 #include "gdbusdaemon.h"
-#include "gkdbus.h"
 
 #ifdef G_OS_UNIX
+#include "gkdbus.h"
 #include <gio/gunixsocketaddress.h>
 #endif
 

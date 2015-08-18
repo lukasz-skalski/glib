@@ -296,8 +296,8 @@ on_name_lost_or_acquired (GDBusConnection  *connection,
 /* ---------------------------------------------------------------------------------------------------- */
 
 static void
-process_request_name_reply (Client  *client,
-                            guint32  request_name_reply)
+process_request_name_reply (Client                    *client,
+                            GBusRequestNameReplyFlags  request_name_reply)
 {
   gboolean subscribe;
 
@@ -305,14 +305,14 @@ process_request_name_reply (Client  *client,
 
   switch (request_name_reply)
     {
-    case 1: /* DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER */
+    case G_BUS_REQUEST_NAME_FLAGS_PRIMARY_OWNER:
       /* We got the name - now listen for NameLost and NameAcquired */
       call_acquired_handler (client);
       subscribe = TRUE;
       client->needs_release = TRUE;
       break;
 
-    case 2: /* DBUS_REQUEST_NAME_REPLY_IN_QUEUE */
+    case G_BUS_REQUEST_NAME_FLAGS_IN_QUEUE:
       /* Waiting in line - listen for NameLost and NameAcquired */
       call_lost_handler (client);
       subscribe = TRUE;
@@ -321,8 +321,8 @@ process_request_name_reply (Client  *client,
 
     default:
       /* assume we couldn't get the name - explicit fallthrough */
-    case 3: /* DBUS_REQUEST_NAME_REPLY_EXISTS */
-    case 4: /* DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER */
+    case G_BUS_REQUEST_NAME_FLAGS_EXISTS:
+    case G_BUS_REQUEST_NAME_FLAGS_ALREADY_OWNER:
       /* Some other part of the process is already owning the name */
       call_lost_handler (client);
       break;
@@ -403,9 +403,9 @@ static void
 has_connection (Client *client)
 {
   GError *error = NULL;
-  guint32 request_name_reply;
+  GBusRequestNameReplyFlags request_name_reply;
 
-  request_name_reply = 0;
+  request_name_reply = G_BUS_REQUEST_NAME_FLAGS_ERROR;
 
   /* listen for disconnection */
   client->disconnected_signal_handler_id = g_signal_connect (client->connection,
@@ -877,7 +877,7 @@ g_bus_unown_name (guint owner_id)
           client->connection != NULL &&
           !g_dbus_connection_is_closed (client->connection))
         {
-          guint32 release_name_reply;
+          GBusReleaseNameReplyFlags release_name_reply;
           GError *error;
 
           error = NULL;
