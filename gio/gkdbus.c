@@ -17,8 +17,8 @@
  * Free Software Foundation, Inc., 59 Temple Place, Suite 330,
  * Boston, MA 02111-1307, USA.
  *
- * Author: Michal Eljasiewicz   <m.eljasiewic@samsung.com>
  * Author: Lukasz Skalski       <l.skalski@samsung.com>
+ * Author: Adrian Szyndela      <adrian.s@samsung.com>
  */
 
 #include "config.h"
@@ -2794,24 +2794,7 @@ again:
        GDBusMessage *message;
 
        message = g_kdbus_decode_dbus_msg (worker, msg);
-
-       if (0)
-         {
-         }
-#ifdef DBUS_DAEMON_EMULATION
-       else if (_is_message_to_dbus_daemon (message))
-         {
-           GDBusMessage *synth_reply;
-
-           synth_reply = _dbus_daemon_synthetic_reply (worker, message);
-           _g_kdbus_worker_send_message (worker, synth_reply, 0, NULL);
-           g_object_unref (synth_reply);
-         }
-#endif
-       else
-         {
-           (* worker->message_received_callback) (message, worker->user_data);
-         }
+       (* worker->message_received_callback) (message, worker->user_data);
 
        g_object_unref (message);
      }
@@ -2940,16 +2923,7 @@ _g_kdbus_send (GKDBusWorker  *worker,
   dst_name = g_dbus_message_get_destination (message);
   if (dst_name != NULL)
     {
-      if (0)
-        {
-        }
-#ifdef DBUS_DAEMON_EMULATION
-      else if (!g_strcmp0 (dst_name, "org.freedesktop.DBus"))
-        {
-          msg->dst_id = worker->unique_id;
-        }
-#endif
-      else if (g_dbus_is_unique_name (dst_name))
+      if (g_dbus_is_unique_name (dst_name))
         {
           if (dst_name[1] != '1' || dst_name[2] != '.')
             {
@@ -3374,6 +3348,31 @@ g_kdbus_ready (gint           fd,
   return G_SOURCE_CONTINUE;
 }
 
+typedef struct
+{
+  GKDBusWorker  *worker;
+  GDBusMessage  *message;
+} SyntheticReplyData;
+
+static gboolean
+deliver_synthetic_reply (gpointer user_data)
+{
+  SyntheticReplyData *data;
+  GKDBusWorker *worker;
+  GDBusMessage *message;
+
+  data = user_data;
+  worker = data->worker;
+  message = data->message;
+
+  (* worker->message_received_callback) (message, worker->user_data);
+
+  g_object_unref (message);
+  g_free (data);
+
+  return FALSE;
+}
+
 void
 _g_kdbus_worker_unfreeze (GKDBusWorker *worker)
 {
@@ -3398,6 +3397,22 @@ _g_kdbus_worker_send_message (GKDBusWorker  *worker,
                               gint           timeout_msec,
                               GError       **error)
 {
+#ifdef DBUS_DAEMON_EMULATION
+  if (_is_message_to_dbus_daemon (message))
+    {
+      SyntheticReplyData *data;
+
+      data = g_new0 (SyntheticReplyData, 1);
+
+      data->worker = worker;
+      data->message = _dbus_daemon_synthetic_reply (worker, message);
+
+      g_main_context_invoke (worker->context, deliver_synthetic_reply, data);
+
+      return TRUE;
+    }
+#endif /* DBUS_DAEMON_EMULATION */
+
   return _g_kdbus_send (worker, message, NULL, timeout_msec, error);
 }
 
@@ -3408,7 +3423,6 @@ _g_kdbus_worker_send_message_sync (GKDBusWorker  *worker,
                                    gint           timeout_msec,
                                    GError       **error)
 {
-
 #ifdef DBUS_DAEMON_EMULATION
   if (_is_message_to_dbus_daemon (message))
     {
