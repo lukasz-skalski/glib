@@ -1184,12 +1184,14 @@ g_dbus_connection_start_message_processing (GDBusConnection *connection)
   if (!check_initialized (connection))
     return;
 
-  g_assert (connection->worker || connection->kdbus_worker);
-
-  if (connection->kdbus_worker)
-    _g_kdbus_worker_unfreeze (connection->kdbus_worker);
-  else
+  if (connection->worker)
     _g_dbus_worker_unfreeze (connection->worker);
+#ifdef G_OS_UNIX
+  else if (connection->kdbus_worker)
+    _g_kdbus_worker_unfreeze (connection->kdbus_worker);
+#endif
+  else
+    g_assert_not_reached ();
 }
 
 /**
@@ -1647,20 +1649,21 @@ g_dbus_connection_close_sync (GDBusConnection  *connection,
  * @flags: a set of flags from the GBusNameOwnerFlags enumeration
  * @error: return location for error or %NULL
  *
- * Synchronously acquires name on the bus and returns status code.
+ * Synchronously acquires name on the bus and returns status code
+ * from the #GBusRequestNameReplyFlags enumeration.
  *
  * The calling thread is blocked until a reply is received.
  *
  * Returns: status code or %G_BUS_REQUEST_NAME_FLAGS_ERROR
  *     if @error is set.
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 GBusRequestNameReplyFlags
-_g_dbus_request_name (GDBusConnection     *connection,
-                      const gchar         *name,
-                      GBusNameOwnerFlags   flags,
-                      GError             **error)
+g_dbus_request_name (GDBusConnection     *connection,
+                     const gchar         *name,
+                     GBusNameOwnerFlags   flags,
+                     GError             **error)
 {
   GVariant *result;
   guint32 request_name_reply;
@@ -1695,19 +1698,20 @@ _g_dbus_request_name (GDBusConnection     *connection,
  * @name: well-known bus name (name to release)
  * @error: return location for error or %NULL
  *
- * Synchronously releases name on the bus and returns status code.
+ * Synchronously releases name on the bus and returns status code
+ * from the #GBusReleaseNameReplyFlags enumeration.
  *
  * The calling thread is blocked until a reply is received.
  *
  * Returns: status code or %G_BUS_RELEASE_NAME_FLAGS_ERROR
  *     if @error is set.
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 GBusReleaseNameReplyFlags
-_g_dbus_release_name (GDBusConnection  *connection,
-                      const gchar      *name,
-                      GError          **error)
+g_dbus_release_name (GDBusConnection  *connection,
+                     const gchar      *name,
+                     GError          **error)
 {
   GVariant *result;
   guint32 release_name_reply;
@@ -1737,13 +1741,24 @@ _g_dbus_release_name (GDBusConnection  *connection,
 }
 
 /**
+ * g_dbus_add_match:
+ * @connection: a #GDBusConnection
+ * @match_rule: match rule to add to the @connection
+ * @error: return location for error or %NULL
  *
+ * Synchronously adds a match rule to match messages.
  *
+ * The calling thread is blocked until a reply is received.
+ *
+ * Returns: %TRUE if the operation succeeded, %FALSE
+ *     if @error is set.
+ *
+ * Since: 2.44
  */
 gboolean
-_g_dbus_add_match (GDBusConnection  *connection,
-                   const gchar      *match_rule,
-                   GError          **error)
+g_dbus_add_match (GDBusConnection  *connection,
+                  const gchar      *match_rule,
+                  GError          **error)
 {
   GVariant *result;
   gboolean ret;
@@ -1776,13 +1791,24 @@ _g_dbus_add_match (GDBusConnection  *connection,
 }
 
 /**
+ * g_dbus_remove_match:
+ * @connection: a #GDBusConnection
+ * @match_rule: match rule to remove from the @connection
+ * @error: return location for error or %NULL
  *
+ * Synchronously removes the first rule that matches.
  *
+ * The calling thread is blocked until a reply is received.
+ *
+ * Returns: %TRUE if the operation succeeded, %FALSE
+ *     if @error is set.
+ *
+ * Since: 2.44
  */
 gboolean
-_g_dbus_remove_match (GDBusConnection  *connection,
-                      const gchar      *match_rule,
-                      GError          **error)
+g_dbus_remove_match (GDBusConnection  *connection,
+                     const gchar      *match_rule,
+                     GError          **error)
 {
   GVariant *result;
   gboolean ret;
@@ -1826,11 +1852,11 @@ _g_dbus_remove_match (GDBusConnection  *connection,
  * Returns: the unique ID of the bus or %NULL if @error is set.
  *     Free with g_free().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 gchar *
-_g_dbus_get_bus_id (GDBusConnection  *connection,
-                    GError          **error)
+g_dbus_get_bus_id (GDBusConnection  *connection,
+                   GError          **error)
 {
   GVariant *result;
   gchar *bus_id;
@@ -1946,11 +1972,11 @@ _g_dbus_get_list_internal (GDBusConnection    *connection,
  * Returns: a list of all currently-owned names on the bus or %NULL if
  *     @error is set. Free with g_strfreev().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 gchar **
-_g_dbus_get_list_names (GDBusConnection  *connection,
-                        GError          **error)
+g_dbus_get_list_names (GDBusConnection  *connection,
+                       GError          **error)
 {
   gchar **strv;
 
@@ -1974,11 +2000,11 @@ _g_dbus_get_list_names (GDBusConnection  *connection,
  * Returns: a list of all names that can be activated on the bus or %NULL if
  *     @error is set. Free with g_strfreev().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 gchar **
-_g_dbus_get_list_activatable_names (GDBusConnection  *connection,
-                                    GError          **error)
+g_dbus_get_list_activatable_names (GDBusConnection  *connection,
+                                   GError          **error)
 {
   gchar **strv;
 
@@ -2007,12 +2033,12 @@ _g_dbus_get_list_activatable_names (GDBusConnection  *connection,
  * Returns: the unique bus names of connections currently queued for the @name
  *     or %NULL if @error is set. Free with g_strfreev().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 gchar **
-_g_dbus_get_list_queued_owners (GDBusConnection  *connection,
-                                const gchar      *name,
-                                GError          **error)
+g_dbus_get_list_queued_owners (GDBusConnection  *connection,
+                               const gchar      *name,
+                               GError          **error)
 {
   gchar **strv;
 
@@ -2044,12 +2070,12 @@ _g_dbus_get_list_queued_owners (GDBusConnection  *connection,
  *     name given. If the requested name doesn't have an owner, function
  *     returns %NULL and @error is set. Free with g_free().
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 gchar *
-_g_dbus_get_name_owner (GDBusConnection  *connection,
-                        const gchar      *name,
-                        GError          **error)
+g_dbus_get_name_owner (GDBusConnection  *connection,
+                       const gchar      *name,
+                       GError          **error)
 {
   GVariant *result;
   gchar *name_owner;
@@ -2091,20 +2117,19 @@ _g_dbus_get_name_owner (GDBusConnection  *connection,
  * bus. If unable to determine it, an @error is returned.
  *
  * If @name contains a value not compatible with the D-Bus syntax and naming
- * conventions for bus names, the operation returns (guint32) -1 and @error
- * is set.
+ * conventions for bus names, the operation returns -1 and @error is set.
  *
  * The calling thread is blocked until a reply is received.
  *
- * Returns: the Unix process ID of the process connected to the bus or
- *     (guint32) -1 if @error is set.
+ * Returns: the Unix process ID of the process connected to the bus or -1
+ *     if @error is set.
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 pid_t
-_g_dbus_get_connection_pid (GDBusConnection  *connection,
-                            const gchar      *name,
-                            GError          **error)
+g_dbus_get_connection_pid (GDBusConnection  *connection,
+                           const gchar      *name,
+                           GError          **error)
 {
   GVariant *result;
   pid_t pid;
@@ -2144,20 +2169,19 @@ _g_dbus_get_connection_pid (GDBusConnection  *connection,
  * bus. If unable to determine it, an @error is returned.
  *
  * If @name contains a value not compatible with the D-Bus syntax and naming
- * conventions for bus names, the operation returns (guint32) -1 and @error
- * is set.
+ * conventions for bus names, the operation returns -1 and @error is set.
  *
  * The calling thread is blocked until a reply is received.
  *
- * Returns: the Unix user ID of the process connected to the bus or
- *     (guint32) -1 if @error is set.
+ * Returns: the Unix user ID of the process connected to the bus or -1
+ *     if @error is set.
  *
- * Since: 2.4x
+ * Since: 2.44
  */
 uid_t
-_g_dbus_get_connection_uid (GDBusConnection  *connection,
-                            const gchar      *name,
-                            GError          **error)
+g_dbus_get_connection_uid (GDBusConnection  *connection,
+                           const gchar      *name,
+                           GError          **error)
 {
   GVariant *result;
   uid_t uid;
@@ -2189,14 +2213,26 @@ _g_dbus_get_connection_uid (GDBusConnection  *connection,
 
 /**
  * g_dbus_start_service_by_name:
+ * @connection: a #GDBusConnection
+ * @name: name of the service to start
+ * @flags: (currently not used)
+ * @error: return location for error or %NULL
  *
- * Since: 2.4x
+ * Synchronously tries to launch the executable associated
+ * with a @name.
+ *
+ * The calling thread is blocked until a reply is received.
+ *
+ * Returns: status code or %G_BUS_START_SERVICE_REPLY_ERROR
+ *     if @error is set.
+ *
+ * Since: 2.44
  */
 GBusStartServiceReplyFlags
-_g_dbus_start_service_by_name (GDBusConnection  *connection,
-                               const gchar      *name,
-                               guint32           flags,
-                               GError          **error)
+g_dbus_start_service_by_name (GDBusConnection  *connection,
+                              const gchar      *name,
+                              guint32           flags,
+                              GError          **error)
 {
   GVariant *result;
   guint32 ret;

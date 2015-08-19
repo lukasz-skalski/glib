@@ -1,6 +1,6 @@
 /* GIO - GLib Input, Output and Streaming Library
  *
- * Copyright (C) 2013 Samsung Electronics
+ * Copyright (C) 2015 Samsung Electronics
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -219,9 +219,8 @@ typedef struct {
 } Match;
 
 
-/**
+/*
  * SipHash algorithm
- *
  */
 static void
 _g_siphash24 (guint8         out[8],
@@ -526,9 +525,8 @@ match_free (Match *match)
 
 /* ---------------------------------------------------------------------------------------------------- */
 
-/**
- * _g_kdbus_open:
- *
+/*
+ * _g_kdbus_open
  */
 gboolean
 _g_kdbus_open (GKDBusWorker  *worker,
@@ -550,9 +548,8 @@ _g_kdbus_open (GKDBusWorker  *worker,
 }
 
 
-/**
- * _g_kdbus_close:
- *
+/*
+ * _g_kdbus_close
  */
 gboolean
 _g_kdbus_close (GKDBusWorker *worker)
@@ -584,9 +581,8 @@ _g_kdbus_close (GKDBusWorker *worker)
 }
 
 
-/**
- * _g_kdbus_is_closed:
- *
+/*
+ * _g_kdbus_is_closed
  */
 gboolean
 _g_kdbus_is_closed (GKDBusWorker *worker)
@@ -596,11 +592,6 @@ _g_kdbus_is_closed (GKDBusWorker *worker)
   return worker->closed;
 }
 
-
-/**
- * g_kdbus_free_data:
- *
- */
 static void
 g_kdbus_free_data (GKDBusWorker  *worker,
                    guint64        offset)
@@ -614,11 +605,6 @@ g_kdbus_free_data (GKDBusWorker  *worker,
   ioctl (worker->fd, KDBUS_CMD_FREE, &cmd);
 }
 
-
-/**
- * g_kdbus_close_msg:
- *
- */
 static void
 g_kdbus_close_msg (GKDBusWorker      *worker,
                    struct kdbus_msg  *msg)
@@ -628,21 +614,7 @@ g_kdbus_close_msg (GKDBusWorker      *worker,
 
   KDBUS_ITEM_FOREACH (item, msg, items)
     {
-      if (0)
-        {
-        }
-      /*
-      if (item->type == KDBUS_ITEM_FDS)
-        {
-          guint cnt;
-          guint num_fds;
-
-          num_fds = (item->size - G_STRUCT_OFFSET(struct kdbus_item, fds)) / sizeof(int);
-          for (cnt = 0; cnt < num_fds; cnt++)
-            close(item->fds[cnt]);
-        }
-      */
-      else if (item->type == KDBUS_ITEM_PAYLOAD_MEMFD)
+      if (item->type == KDBUS_ITEM_PAYLOAD_MEMFD)
         close (item->memfd.fd);
     }
 
@@ -651,9 +623,8 @@ g_kdbus_close_msg (GKDBusWorker      *worker,
 }
 
 
-/**
- * g_kdbus_translate_nameowner_flags:
- *
+/*
+ * g_kdbus_translate_nameowner_flags
  */
 static void
 g_kdbus_translate_nameowner_flags (GBusNameOwnerFlags   flags,
@@ -677,10 +648,11 @@ g_kdbus_translate_nameowner_flags (GBusNameOwnerFlags   flags,
 
 /* ---------------------------------------------------------------------------------------------------- */
 
-/**
+/* < internal >
+ *
  * _g_kdbus_Hello:
  *
- * Gets the unique name
+ * Gets the unique name.
  *
  * Returns: the unique name or NULL. Do not free this string,
  * it is owned by GKDBusWorker.
@@ -787,10 +759,12 @@ _g_kdbus_Hello (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_RequestName:
  *
- * Synchronously acquires name on the bus and returns status code.
+ * Synchronously acquires name on the bus and returns status code
+ * from the GBusRequestNameReplyFlags enumeration.
  *
  * Returns: status code or G_BUS_REQUEST_NAME_FLAGS_ERROR
  * if error is set.
@@ -871,10 +845,12 @@ _g_kdbus_RequestName (GKDBusWorker        *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_ReleaseName:
  *
- * Synchronously releases name on the bus and returns status code.
+ * Synchronously releases name on the bus and returns status code
+ * from the GBusReleaseNameReplyFlags enumeration.
  *
  * Returns: status code or G_BUS_RELEASE_NAME_FLAGS_ERROR
  * if error is set.
@@ -947,7 +923,8 @@ _g_kdbus_ReleaseName (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetBusId:
  *
  * Synchronously returns the unique ID of the bus.
@@ -992,7 +969,8 @@ expand_strv (gchar  ***strv_ptr,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetListNames:
  *
  * Synchronously returns a list of:
@@ -1110,7 +1088,8 @@ g_kdbus_NameHasOwner_internal (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetListQueuedOwners:
  *
  * Synchronously returns the unique bus names of connections currently
@@ -1189,7 +1168,8 @@ _g_kdbus_GetListQueuedOwners (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_NameHasOwner:
  *
  * Checks if the specified name exists (currently has an owner).
@@ -1335,9 +1315,17 @@ error:
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetNameOwner:
  *
+ * Synchronously returns the unique connection name of the primary owner of
+ * the name given. If the requested name doesn't have an owner, an error is
+ * returned.
+ *
+ * Returns: the unique connection name of the primary owner of the
+ * name given. If the requested name doesn't have an owner, function
+ * returns NULL and error is set. Free with g_free().
  */
 gchar *
 _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
@@ -1369,9 +1357,18 @@ _g_kdbus_GetNameOwner (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetConnectionUnixProcessID:
  *
+ * Synchronously returns the Unix process ID of the process connected to the
+ * bus. If unable to determine it, an error is returned.
+ *
+ * If name contains a value not compatible with the D-Bus syntax and naming
+ * conventions for bus names, the operation returns -1 and error is set.
+ *
+ * Returns: the Unix process ID of the process connected to the bus or -1
+ * if error is set.
  */
 pid_t
 _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
@@ -1400,9 +1397,18 @@ _g_kdbus_GetConnectionUnixProcessID (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetConnectionUnixUser:
  *
+ * Synchronously returns the Unix user ID of the process connected to the
+ * bus. If unable to determine it, an error is returned.
+ *
+ * If name contains a value not compatible with the D-Bus syntax and naming
+ * conventions for bus names, the operation returns -1 and error is set.
+ *
+ * Returns: the Unix user ID of the process connected to the bus or -1
+ * if error is set.
  */
 uid_t
 _g_kdbus_GetConnectionUnixUser (GKDBusWorker  *worker,
@@ -1431,9 +1437,16 @@ _g_kdbus_GetConnectionUnixUser (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_GetConnectionSecurityLabel:
  *
+ * Synchronously returns security label of the process connected to the bus.
+ *
+ * If name contains a value not compatible with the D-Bus syntax and naming
+ * conventions for bus names, the operation returns -1 and error is set.
+ *
+ * Returns: security label of the process connected to the bus or -1
  */
 gchar *
 _g_kdbus_GetConnectionSecurityLabel (GKDBusWorker  *worker,
@@ -1462,9 +1475,15 @@ _g_kdbus_GetConnectionSecurityLabel (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_StartServiceByName:
  *
+ * Synchronously tries to launch the executable associated
+ * with a name.
+ *
+ * Returns: status code or G_BUS_START_SERVICE_REPLY_ERROR
+   if error is set.
  */
 GBusStartServiceReplyFlags
 _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
@@ -1516,7 +1535,7 @@ _g_kdbus_StartServiceByName (GKDBusWorker  *worker,
 }
 
 
-/**
+/*
  * g_kdbus_bloom_add_data:
  * Based on bus-bloom.c from systemd
  * http://cgit.freedesktop.org/systemd/systemd/tree/src/libsystemd/sd-bus/bus-bloom.c
@@ -1560,11 +1579,6 @@ g_kdbus_bloom_add_data (GKDBusWorker  *worker,
     }
 }
 
-
-/**
- * g_kdbus_bloom_add_pair:
- *
- */
 static void
 g_kdbus_bloom_add_pair (GKDBusWorker  *worker,
                         guint64        bloom_data[],
@@ -1582,11 +1596,6 @@ g_kdbus_bloom_add_pair (GKDBusWorker  *worker,
   g_kdbus_bloom_add_data(worker, bloom_data, buf, size);
 }
 
-
-/**
- * g_kdbus_bloom_add_prefixes:
- *
- */
 static void
 g_kdbus_bloom_add_prefixes (GKDBusWorker  *worker,
                             guint64        bloom_data[],
@@ -1616,8 +1625,14 @@ g_kdbus_bloom_add_prefixes (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_AddMatch:
+ *
+ * Synchronously adds a match rule to match messages.
+ *
+ * Returns: TRUE if the operation succeeded, FALSE
+ * if error is set.
  *
  */
 gboolean
@@ -1774,9 +1789,14 @@ _g_kdbus_AddMatch (GKDBusWorker  *worker,
 }
 
 
-/**
+/* < internal >
+ *
  * _g_kdbus_RemoveMatch:
  *
+ * Synchronously removes the first rule that matches.
+ *
+ * Returns: TRUE if the operation succeeded, FALSE
+ * if error is set.
  */
 gboolean
 _g_kdbus_RemoveMatch (GKDBusWorker  *worker,
@@ -1853,9 +1873,8 @@ _g_kdbus_RemoveMatch (GKDBusWorker  *worker,
 }
 
 
-/**
- * _g_kdbus_subscribe_name_owner_changed_internal:
- *
+/*
+ * _g_kdbus_subscribe_name_owner_changed_internal
  */
 static gboolean
 _g_kdbus_subscribe_name_owner_changed_internal (GKDBusWorker  *worker,
@@ -1940,9 +1959,8 @@ _g_kdbus_subscribe_name_owner_changed_internal (GKDBusWorker  *worker,
 }
 
 
-/**
- * _g_kdbus_subscribe_name_acquired:
- *
+/*
+ * _g_kdbus_subscribe_name_acquired
  */
 gboolean
 _g_kdbus_subscribe_name_acquired (GKDBusWorker  *worker,
@@ -2022,9 +2040,8 @@ _g_kdbus_subscribe_name_acquired (GKDBusWorker  *worker,
 }
 
 
-/**
- * _g_kdbus_subscribe_name_lost:
- *
+/*
+ * _g_kdbus_subscribe_name_lost
  */
 gboolean
 _g_kdbus_subscribe_name_lost (GKDBusWorker  *worker,
@@ -2104,9 +2121,8 @@ _g_kdbus_subscribe_name_lost (GKDBusWorker  *worker,
 }
 
 
-/**
- * _g_kdbus_subscribe_name_owner_changed:
- *
+/*
+ * _g_kdbus_subscribe_name_owner_changed
  */
 gboolean
 _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
@@ -2263,7 +2279,7 @@ _g_kdbus_subscribe_name_owner_changed (GKDBusWorker  *worker,
 }
 
 
-/**
+/*
  * g_kdbus_setup_bloom:
  * Based on bus-bloom.c from systemd
  * http://cgit.freedesktop.org/systemd/systemd/tree/src/libsystemd/sd-bus/bus-bloom.c
@@ -2361,9 +2377,8 @@ g_kdbus_setup_bloom (GKDBusWorker               *worker,
 }
 
 
-/**
- * g_kdbus_translate_id_change:
- *
+/*
+ * g_kdbus_translate_id_change
  */
 static void
 g_kdbus_translate_id_change (GKDBusWorker       *worker,
@@ -2392,9 +2407,8 @@ g_kdbus_translate_id_change (GKDBusWorker       *worker,
 }
 
 
-/**
- * g_kdbus_translate_name_change:
- *
+/*
+ * g_kdbus_translate_name_change
  */
 static void
 g_kdbus_translate_name_change (GKDBusWorker       *worker,
@@ -2476,9 +2490,8 @@ g_kdbus_translate_name_change (GKDBusWorker       *worker,
 }
 
 
-/**
- * g_kdbus_translate_kernel_reply:
- *
+/*
+ * g_kdbus_translate_kernel_reply
  */
 static void
 g_kdbus_translate_kernel_reply (GKDBusWorker       *worker,
@@ -2509,9 +2522,8 @@ g_kdbus_translate_kernel_reply (GKDBusWorker       *worker,
 }
 
 
-/**
- * g_kdbus_decode_kernel_msg:
- *
+/*
+ * g_kdbus_decode_kernel_msg
  */
 static void
 g_kdbus_decode_kernel_msg (GKDBusWorker      *worker,
@@ -2549,9 +2561,8 @@ g_kdbus_decode_kernel_msg (GKDBusWorker      *worker,
 }
 
 
-/**
- * g_kdbus_decode_dbus_msg:
- *
+/*
+ * g_kdbus_decode_dbus_msg
  */
 static GDBusMessage *
 g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
@@ -2588,7 +2599,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
 
       switch (item->type)
         {
-         /* KDBUS_ITEM_DST_NAME */
          case KDBUS_ITEM_DST_NAME:
            /* Classic D-Bus doesn't make this known to the receiver, so
             * we don't do it here either (for compatibility with the
@@ -2596,7 +2606,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
             */
            break;
 
-        /* KDBUS_ITEM_PALOAD_OFF */
         case KDBUS_ITEM_PAYLOAD_OFF:
           {
             GVariantVector vector;
@@ -2640,7 +2649,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
           }
           break;
 
-        /* KDBUS_ITEM_PAYLOAD_MEMFD */
         case KDBUS_ITEM_PAYLOAD_MEMFD:
           {
             GVariantVector vector;
@@ -2660,7 +2668,6 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
           }
           break;
 
-        /* KDBUS_ITEM_FDS */
         case KDBUS_ITEM_FDS:
           {
             GUnixFDList *fd_list;
@@ -2757,9 +2764,8 @@ g_kdbus_decode_dbus_msg (GKDBusWorker      *worker,
 }
 
 
-/**
- * _g_kdbus_receive:
- *
+/*
+ * _g_kdbus_receive
  */
 static void
 _g_kdbus_receive (GKDBusWorker  *worker,
@@ -2881,7 +2887,6 @@ g_kdbus_msg_append_bloom (struct kdbus_msg  *msg,
   msg->size += (-msg->size) & 7;
   bloom_item = (struct kdbus_item *) ((guchar *) msg + msg->size);
 
-  /* set size and type */
   bloom_item->size = bloom_item_size;
   bloom_item->type = KDBUS_ITEM_BLOOM_FILTER;
 
@@ -2890,9 +2895,8 @@ g_kdbus_msg_append_bloom (struct kdbus_msg  *msg,
 }
 
 
-/**
- * _g_kdbus_send:
- *
+/*
+ * _g_kdbus_send
  */
 static gboolean
 _g_kdbus_send (GKDBusWorker  *worker,

@@ -1,6 +1,6 @@
-/*  GIO - GLib Input, Output and Streaming Library
+/* GIO - GLib Input, Output and Streaming Library
  *
- * Copyright (C) 2013 Samsung Electronics
+ * Copyright (C) 2015 Samsung Electronics
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

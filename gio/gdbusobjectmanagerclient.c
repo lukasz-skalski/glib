@@ -1122,7 +1122,7 @@ subscribe_signals (GDBusObjectManagerClient *manager,
 
       /* The bus daemon may not implement path_namespace so gracefully
        * handle this by using a fallback triggered if @error is set. */
-      _g_dbus_add_match (manager->priv->connection, manager->priv->match_rule, &error);
+      g_dbus_add_match (manager->priv->connection, manager->priv->match_rule, &error);
     }
 
   if (error == NULL)
@@ -1192,9 +1192,9 @@ maybe_unsubscribe_signals (GDBusObjectManagerClient *manager)
       /* Since the AddMatch call succeeded this is guaranteed to not
        * fail - therefore, don't bother checking the return value
        */
-      _g_dbus_remove_match (manager->priv->connection,
-                            manager->priv->match_rule,
-                            NULL);
+      g_dbus_remove_match (manager->priv->connection,
+                           manager->priv->match_rule,
+                           NULL);
       g_free (manager->priv->match_rule);
       manager->priv->match_rule = NULL;
     }

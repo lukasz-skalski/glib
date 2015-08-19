@@ -118,8 +118,7 @@ static gchar *introspect =
 
 
 /**
- * _is_message_to_dbus_daemon:
- *
+ * _is_message_to_dbus_daemon()
  */
 gboolean
 _is_message_to_dbus_daemon (GDBusMessage  *message)
@@ -133,8 +132,7 @@ _is_message_to_dbus_daemon (GDBusMessage  *message)
 
 
 /**
- * _dbus_daemon_synthetic_reply:
- *
+ * _dbus_daemon_synthetic_reply()
  */
 GDBusMessage *
 _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
@@ -153,10 +151,17 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
   member = g_dbus_message_get_member (message);
   body = g_dbus_message_get_body (message);
 
+  /*
+   * Introspect
+   */
   if (!g_strcmp0 (member, "Introspect"))
     {
       reply_body = g_variant_new ("(s)", introspect);
     }
+
+  /*
+   * AddMatch
+   */
   else if (!g_strcmp0 (member, "AddMatch"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -173,6 +178,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'AddMatch' has wrong args (expected s)");
     }
+
+  /*
+   * RemoveMatch
+   */
   else if (!g_strcmp0 (member, "RemoveMatch"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -189,6 +198,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'RemoveMatch' has wrong args (expected s)");
     }
+
+  /*
+   * GetConnectionCredentials
+   */
   else if (!g_strcmp0 (member, "GetConnectionCredentials"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -243,6 +256,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetConnectionCredentials' has wrong args (expected s)");
     }
+
+  /*
+   * GetConnectionSELinuxSecurityContext
+   */
   else if (!g_strcmp0 (member, "GetConnectionSELinuxSecurityContext"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -274,6 +291,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetConnectionSELinuxSecurityContext' has wrong args (expected s)");
     }
+
+  /*
+   * GetConnectionUnixProcessID
+   */
   else if (!g_strcmp0 (member, "GetConnectionUnixProcessID"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -290,6 +311,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetConnectionUnixProcessID' has wrong args (expected s)");
     }
+
+  /*
+   * GetConnectionUnixUser
+   */
   else if (!g_strcmp0 (member, "GetConnectionUnixUser"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -306,6 +331,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetConnectionUnixUser' has wrong args (expected s)");
     }
+
+  /*
+   * GetId
+   */
   else if (!g_strcmp0 (member, "GetId"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
@@ -321,6 +350,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetId' has wrong args");
     }
+
+  /*
+   * GetNameOwner
+   */
   else if (!g_strcmp0 (member, "GetNameOwner"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -339,6 +372,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'GetNameOwner' has wrong args (expected s)");
     }
+
+  /*
+   * Hello
+   */
   else if (!g_strcmp0 (member, "Hello"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
@@ -353,6 +390,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'Hello' has wrong args");
     }
+
+  /*
+   * ListActivatableNames
+   */
   else if (!g_strcmp0 (member, "ListActivatableNames"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
@@ -382,6 +423,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ListActivatableNames' has wrong args");
     }
+
+  /*
+   * ListNames
+   */
   else if (!g_strcmp0 (member, "ListNames"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
@@ -411,6 +456,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ListNames' has wrong args");
     }
+
+  /*
+   * ListQueuedOwners
+   */
   else if (!g_strcmp0 (member, "ListQueuedOwners"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -442,6 +491,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ListQueuedOwners' has wrong args (expected s)");
     }
+
+  /*
+   * NameHasOwner
+   */
   else if (!g_strcmp0 (member, "NameHasOwner"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -464,6 +517,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'NameHasOwner' has wrong args (expected s)");
     }
+
+  /*
+   * ReleaseName
+   */
   else if (!g_strcmp0 (member, "ReleaseName"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(s)")))
@@ -481,6 +538,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ReleaseName' has wrong args (expected s)");
     }
+
+  /*
+   * ReloadConfig
+   */
   else if (!g_strcmp0 (member, "ReloadConfig"))
     {
       if ((body == NULL) || g_variant_is_of_type (body, G_VARIANT_TYPE_TUPLE))
@@ -489,6 +550,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'ReloadConfig' has wrong args");
     }
+
+  /*
+   * RequestName
+   */
   else if (!g_strcmp0 (member, "RequestName"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
@@ -507,6 +572,10 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'RequestName' has wrong args (expected su)");
     }
+
+  /*
+   * StartServiceByName
+   */
   else if (!g_strcmp0 (member, "StartServiceByName"))
     {
       if (body != NULL && g_variant_is_of_type (body, G_VARIANT_TYPE ("(su)")))
@@ -525,11 +594,19 @@ _dbus_daemon_synthetic_reply (GKDBusWorker  *worker,
         g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                      "Call to 'StartServiceByName' has wrong args (expected su)");
     }
+
+  /*
+   * UpdateActivationEnvironment
+   */
   else if (!g_strcmp0 (member, "UpdateActivationEnvironment"))
     {
       g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED,
                    "'%s' method not supported", member);
     }
+
+  /*
+   * Method not supported
+   */
   else
     {
       g_set_error (&local_error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
