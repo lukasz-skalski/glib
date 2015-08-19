@@ -93,48 +93,49 @@ GDBusConnection *g_dbus_connection_new_for_address_sync       (const gchar      
 
 gboolean                     _g_dbus_connection_is_kdbus          (GDBusConnection     *connection);
 
+/* GLIB_AVAILABLE_IN_2_44 */
 GBusRequestNameReplyFlags    _g_dbus_request_name                 (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GBusNameOwnerFlags   flags,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 GBusReleaseNameReplyFlags    _g_dbus_release_name                 (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gboolean                     _g_dbus_add_match                    (GDBusConnection     *connection,
                                                                    const gchar         *match_rule,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gboolean                     _g_dbus_remove_match                 (GDBusConnection     *connection,
                                                                    const gchar         *match_rule,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gchar                       *_g_dbus_get_bus_id                   (GDBusConnection     *connection,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gchar                      **_g_dbus_get_list_names               (GDBusConnection     *connection,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gchar                      **_g_dbus_get_list_activatable_names   (GDBusConnection     *connection,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gchar                      **_g_dbus_get_list_queued_owners       (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 gchar                       *_g_dbus_get_name_owner               (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 pid_t                        _g_dbus_get_connection_pid           (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 uid_t                        _g_dbus_get_connection_uid           (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    GError             **error);
-
+/* GLIB_AVAILABLE_IN_2_44 */
 GBusStartServiceReplyFlags   _g_dbus_start_service_by_name        (GDBusConnection     *connection,
                                                                    const gchar         *name,
                                                                    guint32              flags,

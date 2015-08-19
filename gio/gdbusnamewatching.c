@@ -400,8 +400,8 @@ invoke_get_name_owner (Client *client)
 /* ---------------------------------------------------------------------------------------------------- */
 
 static void
-process_start_service_by_name (Client   *client,
-                               guint32   result)
+process_start_service_by_name (Client                      *client,
+                               GBusStartServiceReplyFlags   result)
 {
   if (result == G_BUS_START_SERVICE_REPLY_SUCCESS)
     invoke_get_name_owner (client);
@@ -433,7 +433,7 @@ start_service_by_name_cb (GObject      *source_object,
       guint32 start_service_result;
       g_variant_get (result, "(u)", &start_service_result);
 
-      process_start_service_by_name (client, start_service_result);
+      process_start_service_by_name (client, (GBusStartServiceReplyFlags) start_service_result);
     }
   else
     {
@@ -481,7 +481,7 @@ has_connection (Client *client)
     {
       if (_g_dbus_connection_is_kdbus (client->connection))
         {
-          guint32 result;
+          GBusStartServiceReplyFlags result;
 
           result = _g_dbus_start_service_by_name (client->connection, client->name, 0, NULL);
           process_start_service_by_name (client, result);
