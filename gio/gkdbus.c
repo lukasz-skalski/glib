@@ -569,7 +569,7 @@ _g_kdbus_close (GKDBusWorker *worker)
   g_main_loop_unref (worker->loop);
   worker->loop = NULL;
 
-  g_thread_join (worker->thread);
+  /* g_thread_join (worker->thread); FIXME */
   g_thread_unref (worker->thread);
   worker->thread = NULL;
 
