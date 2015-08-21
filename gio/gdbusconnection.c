@@ -3427,15 +3427,8 @@ authenticated:
 
   initially_frozen = (connection->flags & G_DBUS_CONNECTION_FLAGS_DELAY_MESSAGE_PROCESSING) != 0;
 
-  if (connection->worker)
+  if (0)
     {
-      connection->worker = _g_dbus_worker_new (connection->stream,
-                                               connection->capabilities,
-                                               initially_frozen,
-                                               on_worker_message_received,
-                                               on_worker_message_about_to_be_sent,
-                                               on_worker_closed,
-                                               connection);
     }
 #ifdef G_OS_UNIX
   else if (connection->kdbus_worker)
@@ -3449,7 +3442,15 @@ authenticated:
     }
 #endif
   else
-    g_assert_not_reached ();
+    {
+      connection->worker = _g_dbus_worker_new (connection->stream,
+                                               connection->capabilities,
+                                               initially_frozen,
+                                               on_worker_message_received,
+                                               on_worker_message_about_to_be_sent,
+                                               on_worker_closed,
+                                               connection);
+    }
 
   /* if a bus connection, call org.freedesktop.DBus.Hello - this is how we're getting a name */
   if (connection->flags & G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION)
